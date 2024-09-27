@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import matplotlib
 import dynamics
 
-def plotCoefficientsVsReynoldsNumber():
+def plotCoefficientsVsReynoldsNumber(save=False):
     """Plot the coefficients C_F and C_T against the Reynolds number for testing
     """
     arr_beta = [0.2, 0.25, 0.5, 0.8, 1.25, 2, 4, 5]
@@ -29,9 +29,11 @@ def plotCoefficientsVsReynoldsNumber():
         ax.legend(title="Aspect ratio $\\beta$")
     ax_cf.set_ylabel("Correction coefficient Stokes Force - C$_F$")
     ax_ct.set_ylabel("Correction coefficient Torque - C$_T$")
+    if save:
+        plt.savefig("correction_coefficient-vs-reynolds_number.png", dpi=500, bbox_inches="tight")
     plt.show()
 
-def plotSettlingSpeedVsAspectRatio():
+def plotSettlingSpeedVsAspectRatio(save=False):
     config = dynamics.Configuration()
     particle_volume = dynamics.particleVolume(config.a_perp, config.a_para)
     num_points = 20
@@ -76,10 +78,11 @@ def plotSettlingSpeedVsAspectRatio():
     minor_locator = matplotlib.ticker.AutoMinorLocator(4)
     ax.yaxis.set_minor_locator(minor_locator)
     ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
-    plt.savefig("settling_velocity-vs-aspect_ratio.png", dpi=500, bbox_inches="tight")
+    if save:
+        plt.savefig("settling_velocity-vs-aspect_ratio.png", dpi=500, bbox_inches="tight")
     plt.show()
 
-def plotKPhiFormula():
+def plotKPhiFormula(save=False):
     def KPhi0MATLAB(beta):
         gamma = np.log(beta + np.sqrt(beta ** 2 - 1 + 0j)) / (beta * np.sqrt(beta ** 2 - 1 + 0j))
         gamma = np.real(beta)
@@ -106,10 +109,11 @@ def plotKPhiFormula():
     plt.xlabel("Aspect ratio $\\lambda$")
     plt.ylabel("Coefficient K$_{\\phi=0\\deg}$")
     plt.legend(title="Formulas")
-    plt.savefig("K_phi=0-formula_comparison.png", dpi=500, bbox_inches="tight")
+    if save:
+        plt.savefig("K_phi=0-formula_comparison.png", dpi=500, bbox_inches="tight")
     plt.show()
 
-def correctionCoefficientsPlot():
+def correctionCoefficientsPlot(save=False):
     config = dynamics.Configuration()
     plt.style.use("plot_style.mplstyle")
     fig, axes = plt.subplots(1, 2, figsize=(10,4))
@@ -159,9 +163,11 @@ def correctionCoefficientsPlot():
         ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
     plt.legend()
     plt.tight_layout()
+    if save:
+        plt.savefig("correction_coefficients-C_F-C_T-vs-aspect_ratio.png", dpi=500, bbox_inches="tight")
     plt.show()
 
-def plotShapeFactor():
+def plotShapeFactor(save=False):
     betas = np.logspace(-2, 2, num=200)
     F_lambdas = [dynamics.shapeFactor(beta) for beta in betas]
     plt.style.use("plot_style.mplstyle")
@@ -172,7 +178,50 @@ def plotShapeFactor():
     plt.ylabel("Shape factor $F(\\lambda)$")
     plt.xlim(1e-2, 1e2)
     plt.ylim(-1.5, 2.75)
+    if save:
+        plt.savefig("shape_factor-vs-aspect_ratio.png", dpi=500, bbox_inches="tight")
+    plt.show()
+
+def plotLowGravitySettlingSpeed(save=False):
+    config = dynamics.Configuration()
+    const = dynamics.SystemConstants(config)
+    x = const.nu / (const.tau_p * const.a_perp)
+    gravities = np.linspace(0.01, 0.02) * x
+    v_g_arr = []
+    W_arr = []
+    for g in gravities:
+        config.gravitational_acceleration = g
+        const = dynamics.SystemConstants(config)
+        solve_result = integrate.solve_ivp(
+            fun=dynamics.systemDynamics,
+            t_span=(0, 2.0,),
+            y0=np.concat([[0, 0, 0], [0, 0, 1e-2], [0, 1, 0], [0, 0, 0]]),
+            args=(const,),
+            method="RK45",
+        )
+        print(f"beta == {const.beta:.2f} | Steps == {solve_result.t.size}")
+        if solve_result.status == 0:
+            v = np.linalg.norm(solve_result.y[3:6], axis=0)
+            v_g = np.mean(v[-10:])
+            v_g_std = np.std(v[-10:]) / np.sqrt(10)
+            print(f"settling velocity == ({v_g:.2f}+-{v_g_std:.1e})m/s")
+            v_g_arr.append(v_g)
+            W_arr.append(const.W_approx)
+        else:
+            print(f"Status ({solve_result.status}) :: {solve_result.message}")
+            break
+    plt.style.use("plot_style.mplstyle")
+    fig, ax = plt.subplots(1, 1, figsize=(5,4))
+    h = ax.plot(gravities / x, v_g_arr, label="Simulation")
+    ax.plot(gravities / x, W_arr, label="Settling speed $W=g\\tau_p/A^{(g)}$")
+    ax.set(
+        xlabel = "Normalized gravity $ga_\\perp\\tau_p/\\nu$",
+        ylabel = "Settling speed $v_g^*$ (m/s)",
+    )
+    ax.legend()
+    if save:
+        plt.savefig("settling_speed-vs-low_gravity.png", dpi=500, bbox_inches="tight")
     plt.show()
 
 if __name__ == '__main__':
-    pass
+    plotLowGravitySettlingSpeed(save=True)

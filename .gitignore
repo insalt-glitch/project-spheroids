@@ -1,3 +1,4 @@
 *.png
 *.pdf
 *.hdf5
+__pycache__/

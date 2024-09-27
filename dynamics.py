@@ -3,14 +3,13 @@ from scipy import optimize
 from scipy.interpolate import RectBivariateSpline
 from typing import Tuple
 
-GRAVITATIONAL_ACCELERATION = 9.81 # m / s^2
-
 class Configuration:
     a_para = 47.9e-6  / 2 # m
     a_perp = 239.4e-6 / 2 # m
     particle_density = 1.2e3 # kg / m^3
     fluid_density = 1.204 # kg / m^3
     fluid_kinematic_viscosity = 1.5e-5 # m^2 / s
+    gravitational_acceleration = 9.81 # m / s^2
 
 class SystemConstants:
     def __init__(self, config: Configuration):
@@ -25,6 +24,7 @@ class SystemConstants:
             tau_p    (float): particle response time
             W_approx (float): approximate particle settling speed
             F_lambda (float): particle shape factor
+            g        (float): gravitational acceleration
         Correction factors:
             C_F      (float): Stokes force (quiescent fluid)
             C_T      (float): torque       (quiescent fluid)
@@ -49,6 +49,7 @@ class SystemConstants:
         self.a_perp = config.a_perp
         self.a_para = config.a_para
         self.F_lambda = shapeFactor(self.beta)
+        self.g = config.gravitational_acceleration
         self.m_p = particleMass(particle_volume, config.particle_density)
         self.tau_p = particleResponseTime(
             config.a_perp,
@@ -63,6 +64,7 @@ class SystemConstants:
             config.particle_density,
             config.fluid_density,
             config.fluid_kinematic_viscosity,
+            config.gravitational_acceleration,
         )
         self.C_perp, self.C_para = rotationalResistanceCoefficients(config.a_perp, config.a_para)
         self.A_perp, self.A_para = translationalResistanceCoefficients(self.beta)
@@ -147,6 +149,7 @@ def approximateSettlingSpeed(
     rho_p: float,
     rho_f: float,
     nu: float,
+    g: float,
 ) -> float:
     """Aproximate the slip velocity W of the particle at the fixed point (equilibrium/settingling velocity).
 
@@ -160,6 +163,7 @@ def approximateSettlingSpeed(
         rho_p (float): density of the particle
         rho_f (float): density of the fluid/gas around the particle
         nu (float): kinematic viscosity of the surrounding fluid/gas
+        g (float): gravitational acceleration
 
     Returns:
         float: slip velocity
@@ -168,7 +172,7 @@ def approximateSettlingSpeed(
     tau_p = particleResponseTime(a_perp, a_para, rho_p, rho_f, nu)
     A_perp, A_para = translationalResistanceCoefficients(beta)
     A_g = A_perp if (beta > 1) else A_para
-    return GRAVITATIONAL_ACCELERATION * tau_p / A_g
+    return g * tau_p / A_g
 
 def steadyStateSettlingSpeed(
     C_F: float,
@@ -176,6 +180,7 @@ def steadyStateSettlingSpeed(
     tau_p: float,
     A_g: float,
     nu: float,
+    g: float,
 ) -> float:
     """Compute the steady-state settling speed (v_g^*) of the particle
 
@@ -188,12 +193,13 @@ def steadyStateSettlingSpeed(
         tau_p (float): particle response time
         A_g (float): component in direction of gravity (in steady state)
         nu (float): kinematic viscosity of the surrounding fluid/gas
+        g (float): gravitational acceleration
 
     Returns:
         float: steady-state settling speed
     """
     v_g_star = 4 * nu * (
-        np.sqrt(1 + 3 * C_F * a_perp * GRAVITATIONAL_ACCELERATION * tau_p / (2 * nu)) - 1
+        np.sqrt(1 + 3 * C_F * a_perp * g * tau_p / (2 * nu)) - 1
     ) / (3 * a_perp * A_g * C_F)
     return v_g_star
 
@@ -541,7 +547,7 @@ def systemDynamics(
     # TODO: In the MATLAB script the velocity in the x-direction is used. Why?
     Re_p0 = particleReynoldsNumber(const.a_perp, const.a_para, v_mag, const.nu)
     C_F = correctionFactorStokesForce(Re_p0, const.beta, full_solve=True)
-    v_g_star = steadyStateSettlingSpeed(C_F, const.a_perp, const.tau_p, const.A_g, const.nu)
+    v_g_star = steadyStateSettlingSpeed(C_F, const.a_perp, const.tau_p, const.A_g, const.nu, const.g)
     Re_p = particleReynoldsNumber(const.a_perp, const.a_para, v_g_star, const.nu)
     C_T = correctionFactorTorque(Re_p, const.beta, const.F_lambda)
     # Full terms for torque and stokes force
@@ -553,7 +559,7 @@ def systemDynamics(
     dJ_pdt = (np.outer(n, omega) + np.outer(omega, n)) * (const.I_para - const.I_perp)
     # Derivatives of the system variables
     dxdt = v
-    dvdt = F_h / const.m_p + GRAVITATIONAL_ACCELERATION
+    dvdt = F_h / const.m_p + const.g
     dndt = np.cross(omega, n)
     domegadt = I_pinverse @ (T_h - dJ_pdt @ omega)
     state_derivative = np.concat([dxdt, dvdt, dndt, domegadt])
