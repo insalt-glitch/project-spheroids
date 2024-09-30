@@ -61,6 +61,7 @@ def plotSettlingSpeedVsAspectRatio(save=False):
         else:
             print(f"Status ({solve_result.status}) :: {solve_result.message}")
             break
+    # num_points = min(len(v_g_arr), num_points)
     plt.style.use("plot_style.mplstyle")
     fig, ax = plt.subplots(1, 1, figsize=(6,4))
     h = ax.plot(betas[:num_points], v_g_arr[:num_points])
@@ -224,4 +225,23 @@ def plotLowGravitySettlingSpeed(save=False):
     plt.show()
 
 if __name__ == '__main__':
-    plotLowGravitySettlingSpeed(save=True)
+    # config = dynamics.Configuration()
+    # particle_volume = dynamics.particleVolume(config.a_perp, config.a_para)
+    # config.a_perp, config.a_para = dynamics.spheriodDimensionsFromBeta(0.7, particle_volume)
+    # const = dynamics.SystemConstants(config)
+    # solve_result = integrate.solve_ivp(
+    #     fun=dynamics.systemDynamics,
+    #     t_span=(0, 2.0,),
+    #     y0=np.concat([[0, 0, 0], [0, 0, 1e-2], [0, 1, 0], [0, 0, 0]]),
+    #     args=(const,),
+    #     method="RK45",
+    # )
+    # print(f"beta == {const.beta:.2f} | Steps == {solve_result.t.size}")
+    # v = np.linalg.norm(solve_result.y[3:6], axis=0)
+    # plt.plot(solve_result.t, v)
+    # plt.show()
+    # v_g = np.mean(v[-10:])
+    # v_g_std = np.std(v[-10:]) / np.sqrt(10)
+    # print(f"settling velocity == ({v_g:.2f}+-{v_g_std:.1e})m/s")
+    # print(f"Status ({solve_result.status}) :: {solve_result.message}")
+    plotSettlingSpeedVsAspectRatio()

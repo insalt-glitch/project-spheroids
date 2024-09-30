@@ -24,7 +24,7 @@ class SystemConstants:
             tau_p    (float): particle response time
             W_approx (float): approximate particle settling speed
             F_lambda (float): particle shape factor
-            g        (float): gravitational acceleration
+            g   (np.ndarray): gravitational acceleration
         Correction factors:
             C_F      (float): Stokes force (quiescent fluid)
             C_T      (float): torque       (quiescent fluid)
@@ -49,7 +49,7 @@ class SystemConstants:
         self.a_perp = config.a_perp
         self.a_para = config.a_para
         self.F_lambda = shapeFactor(self.beta)
-        self.g = config.gravitational_acceleration
+        self.g = np.array([0, 0, config.gravitational_acceleration])
         self.m_p = particleMass(particle_volume, config.particle_density)
         self.tau_p = particleResponseTime(
             config.a_perp,
@@ -68,7 +68,7 @@ class SystemConstants:
         )
         self.C_perp, self.C_para = rotationalResistanceCoefficients(config.a_perp, config.a_para)
         self.A_perp, self.A_para = translationalResistanceCoefficients(self.beta)
-        self.A_g = self.A_perp if (self.beta > 1) else self.A_para
+        self.A_g = resistanceCoefficient(self.beta, self.A_perp, self.A_para)
         self.I_perp, self.I_para = particleInteriaTensorCoefficents(
             config.a_perp,
             config.a_para,
@@ -91,7 +91,6 @@ def particleVolume(a_perp: float, a_para: float) -> float:
     Returns:
         float: the volume of the particle
     """
-    #
     return 4 / 3 * np.pi * a_perp ** 2 * a_para
 
 def particleMass(particle_volume: float, rho_p: float) -> float:
@@ -105,6 +104,23 @@ def particleMass(particle_volume: float, rho_p: float) -> float:
         float: mass of the particle
     """
     return particle_volume * rho_p
+
+def resistanceCoefficient(beta: float, A_perp: float, A_para: float ) -> float:
+    """Calculate the resistance coefficient A^(g). It is the component of the
+    translation resistance tensor in direction of gravity (in steady state).
+
+    Args:
+        beta (float): ratio of the radii of a spheroid (aspect ratio)
+        A_perp (float): coefficient (perpendicular to symmetry axis) of the
+            translation resistance tensor
+        A_para (float): coefficient (parallel      to symmetry axis) of the
+            translation resistance tensor
+
+    Returns:
+        float: A^(g) component of the translation resistance tensor in direction
+            of gravity (in steady state)
+    """
+    return A_perp if (beta > 1) else A_para
 
 def particleResponseTime(
     a_perp: float,
@@ -129,7 +145,7 @@ def particleResponseTime(
     Returns:
         float: particle response time tau_p
     """
-    return 2 * rho_p * a_para * a_perp / (9 * rho_f * nu)
+    return 2 * a_para * a_perp * rho_p / (9 * rho_f * nu)
 
 def aspectRatio(a_perp: float, a_para: float) -> float:
     """Calculate the aspect ratio beta of a spheriodal particle.
@@ -149,7 +165,7 @@ def approximateSettlingSpeed(
     rho_p: float,
     rho_f: float,
     nu: float,
-    g: float,
+    g: np.ndarray|float,
 ) -> float:
     """Aproximate the slip velocity W of the particle at the fixed point (equilibrium/settingling velocity).
 
@@ -163,7 +179,7 @@ def approximateSettlingSpeed(
         rho_p (float): density of the particle
         rho_f (float): density of the fluid/gas around the particle
         nu (float): kinematic viscosity of the surrounding fluid/gas
-        g (float): gravitational acceleration
+        g (np.ndarray|float): gravitational acceleration
 
     Returns:
         float: slip velocity
@@ -171,8 +187,8 @@ def approximateSettlingSpeed(
     beta = aspectRatio(a_perp, a_para)
     tau_p = particleResponseTime(a_perp, a_para, rho_p, rho_f, nu)
     A_perp, A_para = translationalResistanceCoefficients(beta)
-    A_g = A_perp if (beta > 1) else A_para
-    return g * tau_p / A_g
+    A_g = resistanceCoefficient(beta, A_perp, A_para)
+    return np.linalg.norm(g) * tau_p / A_g
 
 def steadyStateSettlingSpeed(
     C_F: float,
@@ -180,7 +196,7 @@ def steadyStateSettlingSpeed(
     tau_p: float,
     A_g: float,
     nu: float,
-    g: float,
+    g: np.ndarray|float,
 ) -> float:
     """Compute the steady-state settling speed (v_g^*) of the particle
 
@@ -193,13 +209,13 @@ def steadyStateSettlingSpeed(
         tau_p (float): particle response time
         A_g (float): component in direction of gravity (in steady state)
         nu (float): kinematic viscosity of the surrounding fluid/gas
-        g (float): gravitational acceleration
+        g (np.ndarray|float): gravitational acceleration
 
     Returns:
         float: steady-state settling speed
     """
     v_g_star = 4 * nu * (
-        np.sqrt(1 + 3 * C_F * a_perp * g * tau_p / (2 * nu)) - 1
+        np.sqrt(1 + 3 * C_F * a_perp * np.linalg.norm(g) * tau_p / (2 * nu)) - 1
     ) / (3 * a_perp * A_g * C_F)
     return v_g_star
 
@@ -296,6 +312,7 @@ def rotationalResistanceCoefficients(a_perp: float, a_para: float) -> Tuple[floa
     Returns:
         Tuple[float, float]: coefficients in (perpendicular, parallel) direction
     """
+    # TODO: These coefficients are different in MATLAB then in the paper
     beta = aspectRatio(a_perp=a_perp, a_para=a_para)
     gamma = np.log(beta + np.sqrt(beta ** 2 - 1 + 0j)) / (beta * np.sqrt(beta ** 2 - 1 + 0j))
     gamma = np.real(gamma)
@@ -537,7 +554,7 @@ def systemDynamics(
     F_h0 = - (const.m_p / const.tau_p) * (A @ v)
     F_h1 = - (3 / 16) * (const.m_p / const.tau_p) * \
         (const.a_perp * v_mag / const.nu) * \
-        (3 * A - np.eye(3) * (v @ (A @ v))) @ A @ v
+        (3 * A - np.eye(3) * (v @ A @ v)) @ A @ v
     # Torque + correction for higher particle Reynolds numbers (Re_p ~ 1 - 30)
     T_h0 = - (const.m_p / const.tau_p) * C @ omega
     T_h1 = const.F_lambda * (const.m_p / (6 * np.pi)) \
@@ -555,8 +572,9 @@ def systemDynamics(
     T_h = T_h0 + C_T * T_h1
 
     # Particle interia tensor
-    I_pinverse = (const.I_para - const.I_perp) * np.outer(n, n) - const.I_para * np.eye(3)
-    dJ_pdt = (np.outer(n, omega) + np.outer(omega, n)) * (const.I_para - const.I_perp)
+    I_pinverse = (( const.I_perp - const.I_para) * np.outer(n, n) + const.I_para * np.eye(3)) \
+        / (const.I_perp * const.I_para)
+    dJ_pdt = (const.I_para - const.I_perp) * (np.outer(n, omega) + np.outer(omega, n))
     # Derivatives of the system variables
     dxdt = v
     dvdt = F_h / const.m_p + const.g
