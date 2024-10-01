@@ -292,7 +292,7 @@ def translationalResistanceCoefficients(beta: float) -> Tuple[float, float]:
         Tuple[float, float]: coefficients in (perpendicular, parallel) direction
     """
     gamma = np.log(beta + np.sqrt(beta ** 2 - 1 + 0j)) / (beta * np.sqrt(beta ** 2 - 1 + 0j))
-    assert np.imag(gamma) < 1e-10, "Imaginary part of gamma should be zero"
+    assert np.all(np.imag(gamma) < 1e-10), "Imaginary part of gamma should be zero"
     gamma = np.real(gamma)
     A_perp = 8 * (beta ** 2 - 1) / (3 * beta * ((2 * beta ** 2 - 3) * gamma + 1))
     A_para = 4 * (beta ** 2 - 1) / (3 * beta * ((2 * beta ** 2 - 1) * gamma - 1))
@@ -406,9 +406,10 @@ def correctionFactorStokesForce(
             Re_correction = max(1, beta) / (2 * beta ** (1 / 3))
             Re_JFM = Re_p0 / Re_correction
             # K_phi0 is defined in Ouchene (2020) (Page 4 - Eq. 13)
-            # TODO: The formula in the paper does not agree with the formula here
-            # (copied from the MATLAB-script)
-            K_phi0 = A_para / beta ** (1 / 3)
+            K_phi0 = (8 / 3) * beta ** (-1 / 3) / (
+                + 2 * beta / (1 - beta ** 2)
+                + 2 * (1 - 2 * beta ** 2) / (1 - beta ** 2) ** (3 / 2) * np.arctan(np.sqrt(1 - beta ** 2) / beta)
+            )
             # This approximation of C_F is obtained by rearranging the formula given
             # above (cmp. f_{d,90}(Re,beta)=...) (Fröhlich (2020)) but using the C_{D,0}(Re,beta)
             # from Ouchene (2020) (Page 6 - Eq. 18)
@@ -572,7 +573,7 @@ def systemDynamics(
     T_h = T_h0 + C_T * T_h1
 
     # Particle interia tensor
-    I_pinverse = (( const.I_perp - const.I_para) * np.outer(n, n) + const.I_para * np.eye(3)) \
+    I_pinverse = ((const.I_perp - const.I_para) * np.outer(n, n) + const.I_para * np.eye(3)) \
         / (const.I_perp * const.I_para)
     dJ_pdt = (const.I_para - const.I_perp) * (np.outer(n, omega) + np.outer(omega, n))
     # Derivatives of the system variables

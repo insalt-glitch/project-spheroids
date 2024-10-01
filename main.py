@@ -86,21 +86,22 @@ def plotSettlingSpeedVsAspectRatio(save=False):
 def plotKPhiFormula(save=False):
     def KPhi0MATLAB(beta):
         gamma = np.log(beta + np.sqrt(beta ** 2 - 1 + 0j)) / (beta * np.sqrt(beta ** 2 - 1 + 0j))
-        gamma = np.real(beta)
-        A_p = (4 * (beta ** 2 - 1)) / (3 * beta * ((2 * beta ** 2 - 1) * beta - 1))
+        gamma = np.real(gamma)
+        A_p = (4 * (beta ** 2 - 1)) / (3 * beta * ((2 * beta ** 2 - 1) * gamma - 1))
         K_phi0 = A_p / beta ** (1 / 3)
         return K_phi0
 
     def KPhi0Paper(beta):
-        K_phi0 = (8 / 3) * beta ** (-1 / 3) * (
+        K_phi0 = (8 / 3) * beta ** (-1 / 3) / (
             + 2 * beta / (1 - beta ** 2)
-            + 2 * (1 - 2 * beta ** 2) / (1 - beta ** 2) ** (3 / 2) * np.atan(np.sqrt(1 - beta ** 2) / beta)
+            + 2 * (1 - 2 * beta ** 2) / (1 - beta ** 2) ** (3 / 2) * np.arctan(np.sqrt(1 - beta ** 2) / beta)
         )
         return K_phi0
 
     betas = np.linspace(0.01, 0.99, 99)
     k_phi_matlab = KPhi0MATLAB(betas)
-    k_phi_paper = KPhi0Paper(betas)
+    _, k_phi_paper = KPhi0Paper(betas)
+    k_phi_paper /= betas ** (1 / 3)
     plt.figure(figsize=(6,4))
     plt.style.use("plot_style.mplstyle")
     plt.plot(betas, k_phi_matlab, label="MATLAB (l. 6745)")
@@ -135,8 +136,8 @@ def correctionCoefficientsPlot(save=False):
                 config.a_perp, config.a_para = dynamics.spheriodDimensionsFromBeta(beta, volume)
                 const = dynamics.SystemConstants(config)
                 Re_p0 = dynamics.particleReynoldsNumber(const.a_perp, const.a_para, const.W_approx, const.nu)
-                C_F = dynamics.correctionFactorStokesForce(Re_p0, beta, full_solve=True)
-                v_g_star = dynamics.steadyStateSettlingSpeed(C_F, const.a_perp, const.tau_p, const.A_g, const.nu)
+                C_F = dynamics.correctionFactorStokesForce(Re_p0, const.beta, full_solve=True)
+                v_g_star = dynamics.steadyStateSettlingSpeed(C_F, const.a_perp, const.tau_p, const.A_g, const.nu, const.g)
                 Re_p = dynamics.particleReynoldsNumber(const.a_perp, const.a_para, v_g_star, const.nu)
                 C_T = dynamics.correctionFactorTorque(Re_p, const.beta, const.F_lambda)
                 C_F_arrs[j].append(C_F)
@@ -225,23 +226,4 @@ def plotLowGravitySettlingSpeed(save=False):
     plt.show()
 
 if __name__ == '__main__':
-    # config = dynamics.Configuration()
-    # particle_volume = dynamics.particleVolume(config.a_perp, config.a_para)
-    # config.a_perp, config.a_para = dynamics.spheriodDimensionsFromBeta(0.7, particle_volume)
-    # const = dynamics.SystemConstants(config)
-    # solve_result = integrate.solve_ivp(
-    #     fun=dynamics.systemDynamics,
-    #     t_span=(0, 2.0,),
-    #     y0=np.concat([[0, 0, 0], [0, 0, 1e-2], [0, 1, 0], [0, 0, 0]]),
-    #     args=(const,),
-    #     method="RK45",
-    # )
-    # print(f"beta == {const.beta:.2f} | Steps == {solve_result.t.size}")
-    # v = np.linalg.norm(solve_result.y[3:6], axis=0)
-    # plt.plot(solve_result.t, v)
-    # plt.show()
-    # v_g = np.mean(v[-10:])
-    # v_g_std = np.std(v[-10:]) / np.sqrt(10)
-    # print(f"settling velocity == ({v_g:.2f}+-{v_g_std:.1e})m/s")
-    # print(f"Status ({solve_result.status}) :: {solve_result.message}")
     plotSettlingSpeedVsAspectRatio()
