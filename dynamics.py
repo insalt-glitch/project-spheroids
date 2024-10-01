@@ -258,9 +258,9 @@ def shapeFactor(beta: float) -> float:
     Returns:
         float: shape factor
     """
-    if beta in [0, 1]:
+    if beta in [1, np.inf]:
         return 0
-    if beta == -1:
+    if beta == 0:
         return 2.376
     if beta > 1: # beta > 1 -> prolate spheroid
         e = np.sqrt(1 - 1 / beta ** 2)
