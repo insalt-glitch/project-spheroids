@@ -8,7 +8,7 @@ class Configuration:
     a_perp = 239.4e-6 / 2 # m
     particle_density = 1.2e3 # kg / m^3
     fluid_density = 1.204 # kg / m^3
-    fluid_kinematic_viscosity = 1.5e-5 # m^2 / s
+    fluid_kinematic_viscosity = 1.51147e-5 # m^2 / s
     gravitational_acceleration = 9.81 # m / s^2
 
 class SystemConstants:
@@ -49,7 +49,7 @@ class SystemConstants:
         self.a_perp = config.a_perp
         self.a_para = config.a_para
         self.F_lambda = shapeFactor(self.beta)
-        self.g = np.array([0, 0, config.gravitational_acceleration])
+        self.g = np.array([config.gravitational_acceleration, 0, 0])
         self.m_p = particleMass(particle_volume, config.particle_density)
         self.tau_p = particleResponseTime(
             config.a_perp,
@@ -69,7 +69,7 @@ class SystemConstants:
         self.C_perp, self.C_para = rotationalResistanceCoefficients(config.a_perp, config.a_para)
         self.A_perp, self.A_para = translationalResistanceCoefficients(self.beta)
         self.A_g = resistanceCoefficient(self.beta, self.A_perp, self.A_para)
-        self.I_perp, self.I_para = particleInteriaTensorCoefficents(
+        self.J_perp, self.J_para = particleInteriaTensorCoefficents(
             config.a_perp,
             config.a_para,
             self.m_p,
@@ -312,7 +312,6 @@ def rotationalResistanceCoefficients(a_perp: float, a_para: float) -> Tuple[floa
     Returns:
         Tuple[float, float]: coefficients in (perpendicular, parallel) direction
     """
-    # TODO: These coefficients are different in MATLAB then in the paper
     beta = aspectRatio(a_perp=a_perp, a_para=a_para)
     gamma = np.log(beta + np.sqrt(beta ** 2 - 1 + 0j)) / (beta * np.sqrt(beta ** 2 - 1 + 0j))
     gamma = np.real(gamma)
@@ -516,9 +515,9 @@ def particleInteriaTensorCoefficents(
         Tuple[float, float]: coefficients in the particle interia tensor
     """
     beta = aspectRatio(a_perp=a_perp, a_para=a_para)
-    I_perp = (1 / 5) * particle_mass * a_perp ** 2 * (1 + beta ** 2)
-    I_para = (2 / 5) * particle_mass * a_perp ** 2
-    return I_perp, I_para
+    J_perp = (1 / 5) * particle_mass * a_perp ** 2 * (1 + beta ** 2)
+    J_para = (2 / 5) * particle_mass * a_perp ** 2
+    return J_perp, J_para
 
 def systemDynamics(
     t: float,
@@ -542,8 +541,8 @@ def systemDynamics(
     v     = state[3:6]  # particle velocity
     n     = state[6:9]  # unit vector parallel to the symmetry axis of the particle
     omega = state[9:12] # angular velocity of the particle
-
     n = n / np.linalg.norm(n)
+
     v_mag = np.linalg.norm(v)
     v_hat = v / v_mag
     a = max(const.a_perp, const.a_para)
@@ -555,14 +554,13 @@ def systemDynamics(
     F_h0 = - (const.m_p / const.tau_p) * (A @ v)
     F_h1 = - (3 / 16) * (const.m_p / const.tau_p) * \
         (const.a_perp * v_mag / const.nu) * \
-        (3 * A - np.eye(3) * (v @ A @ v)) @ A @ v
+        (3 * A - np.identity(3) * (v_hat @ A @ v_hat)) @ A @ v
     # Torque + correction for higher particle Reynolds numbers (Re_p ~ 1 - 30)
     T_h0 = - (const.m_p / const.tau_p) * C @ omega
     T_h1 = const.F_lambda * (const.m_p / (6 * np.pi)) \
         * (a ** 3 * v_mag ** 2 / (const.a_perp * const.nu)) \
         * (n @ v_hat) * np.cross(n , v_hat) / const.tau_p
     # Compute correction factors
-    # TODO: In the MATLAB script the velocity in the x-direction is used. Why?
     Re_p0 = particleReynoldsNumber(const.a_perp, const.a_para, v_mag, const.nu)
     C_F = correctionFactorStokesForce(Re_p0, const.beta, full_solve=True)
     v_g_star = steadyStateSettlingSpeed(C_F, const.a_perp, const.tau_p, const.A_g, const.nu, const.g)
@@ -573,14 +571,14 @@ def systemDynamics(
     T_h = T_h0 + C_T * T_h1
 
     # Particle interia tensor
-    I_pinverse = ((const.I_perp - const.I_para) * np.outer(n, n) + const.I_para * np.eye(3)) \
-        / (const.I_perp * const.I_para)
-    dJ_pdt = (const.I_para - const.I_perp) * (np.outer(n, omega) + np.outer(omega, n))
+    J_pinverse = ((const.J_perp - const.J_para) * np.outer(n, n) + const.J_para * np.eye(3)) \
+            / (const.J_perp * const.J_para)
+    dJ_pdt = (const.J_para - const.J_perp) * (np.outer(n, omega) + np.outer(omega, n))
     # Derivatives of the system variables
     dxdt = v
     dvdt = F_h / const.m_p + const.g
     dndt = np.cross(omega, n)
-    domegadt = I_pinverse @ (T_h - dJ_pdt @ omega)
+    domegadt = J_pinverse @ (T_h - dJ_pdt @ omega)
     state_derivative = np.concat([dxdt, dvdt, dndt, domegadt])
     return state_derivative
 
