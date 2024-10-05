@@ -3,6 +3,9 @@ from scipy import integrate
 import matplotlib.pyplot as plt
 import matplotlib
 import dynamics
+from pathlib import Path
+
+FOLDER_FIGURES = Path("figures")
 
 def plotCoefficientsVsReynoldsNumber(save=False):
     """Plot the coefficients C_F and C_T against the Reynolds number for testing
@@ -30,12 +33,11 @@ def plotCoefficientsVsReynoldsNumber(save=False):
     ax_cf.set_ylabel("Correction coefficient Stokes Force - C$_F$")
     ax_ct.set_ylabel("Correction coefficient Torque - C$_T$")
     if save:
-        plt.savefig("correction_coefficient-vs-reynolds_number.png", dpi=500, bbox_inches="tight")
+        plt.savefig(FOLDER_FIGURES / "correction_coefficient-vs-reynolds_number.png", dpi=500, bbox_inches="tight")
     plt.show()
 
 def plotSettlingSpeedVsAspectRatio(save=False):
-    config = dynamics.Configuration()
-    particle_volume = dynamics.particleVolume(config.a_perp, config.a_para)
+    const = dynamics.SystemConstants()
     num_points = 20
     betas = np.hstack([
         np.logspace(np.log10(0.1), np.log10(0.9), num=num_points),
@@ -43,12 +45,14 @@ def plotSettlingSpeedVsAspectRatio(save=False):
     ])
     v_g_arr = []
     for beta in betas:
-        config.a_perp, config.a_para = dynamics.spheriodDimensionsFromBeta(beta, particle_volume)
-        const = dynamics.SystemConstants(config)
+        n0 = np.random.default_rng(0).normal(size=3)
+        n0 = n0 / np.linalg.norm(n0)
+        a_perp, a_para = dynamics.spheriodDimensionsFromBeta(beta, const.particle_volume)
+        const = dynamics.SystemConstants(a_perp=a_perp, a_para=a_para)
         solve_result = integrate.solve_ivp(
             fun=dynamics.systemDynamics,
-            t_span=(0, 2.0,),
-            y0=np.concat([[0, 0, 0], [0, 0, 1e-2], [0, 1, 0], [0, 0, 0]]),
+            t_span=(0, 10.0,),
+            y0=np.concat([[0, 0, 0], [0, 0, 1e-2], n0, [0, 0, 0]]),
             args=(const,),
             method="RK45",
         )
@@ -80,7 +84,7 @@ def plotSettlingSpeedVsAspectRatio(save=False):
     ax.yaxis.set_minor_locator(minor_locator)
     ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
     if save:
-        plt.savefig("settling_velocity-vs-aspect_ratio.png", dpi=500, bbox_inches="tight")
+        plt.savefig(FOLDER_FIGURES / "settling_velocity-vs-aspect_ratio.png", dpi=500, bbox_inches="tight")
     plt.show()
 
 def plotKPhiFormula(save=False):
@@ -112,11 +116,11 @@ def plotKPhiFormula(save=False):
     plt.ylabel("Coefficient K$_{\\phi=0\\deg}$")
     plt.legend(title="Formulas")
     if save:
-        plt.savefig("K_phi=0-formula_comparison.png", dpi=500, bbox_inches="tight")
+        plt.savefig(FOLDER_FIGURES / "K_phi=0-formula_comparison.png", dpi=500, bbox_inches="tight")
     plt.show()
 
-def correctionCoefficientsPlot(save=False):
-    config = dynamics.Configuration()
+def plotCorrectionCoefficients(save=False):
+    const = dynamics.SystemConstants()
     plt.style.use("plot_style.mplstyle")
     fig, axes = plt.subplots(1, 2, figsize=(10,4))
     particle_volumes = [
@@ -133,10 +137,10 @@ def correctionCoefficientsPlot(save=False):
         ]
         for j, betas in enumerate(beta_arrs):
             for beta in betas:
-                config.a_perp, config.a_para = dynamics.spheriodDimensionsFromBeta(beta, volume)
-                const = dynamics.SystemConstants(config)
+                a_perp, a_para = dynamics.spheriodDimensionsFromBeta(beta, volume)
+                const = dynamics.SystemConstants(a_perp=a_perp, a_para=a_para)
                 Re_p0 = dynamics.particleReynoldsNumber(const.a_perp, const.a_para, const.W_approx, const.nu)
-                C_F = dynamics.correctionFactorStokesForce(Re_p0, const.beta, full_solve=True)
+                C_F = dynamics.correctionFactorStokesForce(Re_p0, const.beta, full_solve=False)
                 v_g_star = dynamics.steadyStateSettlingSpeed(C_F, const.a_perp, const.tau_p, const.A_g, const.nu, const.g)
                 Re_p = dynamics.particleReynoldsNumber(const.a_perp, const.a_para, v_g_star, const.nu)
                 C_T = dynamics.correctionFactorTorque(Re_p, const.beta, const.F_lambda)
@@ -166,7 +170,7 @@ def correctionCoefficientsPlot(save=False):
     plt.legend()
     plt.tight_layout()
     if save:
-        plt.savefig("correction_coefficients-C_F-C_T-vs-aspect_ratio.png", dpi=500, bbox_inches="tight")
+        plt.savefig(FOLDER_FIGURES / "correction_coefficients-C_F-C_T-vs-aspect_ratio.png", dpi=500, bbox_inches="tight")
     plt.show()
 
 def plotShapeFactor(save=False):
@@ -181,19 +185,17 @@ def plotShapeFactor(save=False):
     plt.xlim(1e-2, 1e2)
     plt.ylim(-1.5, 2.75)
     if save:
-        plt.savefig("shape_factor-vs-aspect_ratio.png", dpi=500, bbox_inches="tight")
+        plt.savefig(FOLDER_FIGURES / "shape_factor-vs-aspect_ratio.png", dpi=500, bbox_inches="tight")
     plt.show()
 
 def plotLowGravitySettlingSpeed(save=False):
-    config = dynamics.Configuration()
-    const = dynamics.SystemConstants(config)
+    const = dynamics.SystemConstants()
     x = const.nu / (const.tau_p * const.a_perp)
     gravities = np.linspace(0.01, 0.02) * x
     v_g_arr = []
     W_arr = []
     for g in gravities:
-        config.gravitational_acceleration = g
-        const = dynamics.SystemConstants(config)
+        const = dynamics.SystemConstants(gravitational_acceleration=g)
         solve_result = integrate.solve_ivp(
             fun=dynamics.systemDynamics,
             t_span=(0, 2.0,),
@@ -222,8 +224,31 @@ def plotLowGravitySettlingSpeed(save=False):
     )
     ax.legend()
     if save:
-        plt.savefig("settling_speed-vs-low_gravity.png", dpi=500, bbox_inches="tight")
+        plt.savefig(FOLDER_FIGURES / "settling_speed-vs-low_gravity.png", dpi=500, bbox_inches="tight")
     plt.show()
 
 if __name__ == '__main__':
-    plotSettlingSpeedVsAspectRatio()
+    const = dynamics.SystemConstants()
+    x0 = [0.1, 0.2, 0.3]
+    v0 = [5e-2, 7e-2, 3e-2]
+    n0 = np.array([1, 2, 3]) / np.linalg.norm([1,2,3])
+    omega0 = [0.13, 0.2, 0.78]
+    y0 = np.concat([x0, v0, n0, omega0])
+
+    solve_result = integrate.solve_ivp(
+        fun=dynamics.systemDynamics,
+        t_span=(0, 0.2,),
+        y0=y0,
+        args=(const,),
+        method="RK45",
+        rtol=1e-12,
+        atol=1e-12,
+    )
+    # n = solve_result.y[6:9]
+    # phi = np.arccos(n[2]) * 180 / np.pi
+    # print(f"n_final :: {n[:,-1]}")
+    plt.plot(solve_result.t, solve_result.y[9+0], ls=":", color="black", label="x")
+    plt.plot(solve_result.t, solve_result.y[9+1], ls="--",color="black",  label="y")
+    plt.plot(solve_result.t, solve_result.y[9+2], ls="solid", color="black", label="z")
+    plt.legend()
+    plt.show()

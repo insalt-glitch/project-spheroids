@@ -1,18 +1,18 @@
 import numpy as np
 from scipy import optimize
 from scipy.interpolate import RectBivariateSpline
-from typing import Tuple
-
-class Configuration:
-    a_para = 47.9e-6  / 2 # m
-    a_perp = 239.4e-6 / 2 # m
-    particle_density = 1.2e3 # kg / m^3
-    fluid_density = 1.204 # kg / m^3
-    fluid_kinematic_viscosity = 1.51147e-5 # m^2 / s
-    gravitational_acceleration = 9.81 # m / s^2
+from typing import Tuple, List
 
 class SystemConstants:
-    def __init__(self, config: Configuration):
+    def __init__(
+        self,
+        a_para: float = 47.9e-6  / 2,
+        a_perp: float = 239.4e-6 / 2,
+        particle_density: float = 1.2e3,
+        fluid_density: float = 1.204,
+        fluid_kinematic_viscosity: float = 1.51147e-5,
+        gravitational_acceleration: float = 9.81,
+    ):
         """Collection of constants required to solve the differential equations.
 
         Basic particle properties:
@@ -40,38 +40,47 @@ class SystemConstants:
             C_para   (float): coefficient (parallel      to symmetry axis)
 
         Args:
-            config (Configuration): Configuration parameters which are used to
-                calculate all other constants.
+            a_para (float, optional): particle radius (parallel      to
+                symmetry axis). Defaults to 47.9e-6/2.
+            a_perp (float, optional): particle radius (perpendicular to
+                symmetry axis). Defaults to 239.4e-6/2.
+            particle_density (float, optional): density of the particle. Defaults to 1.2e3.
+            fluid_density (float, optional): mass density of the
+                surrounding fluid/gas. Defaults to 1.204.
+            fluid_kinematic_viscosity (float, optional): kinematic viscosity
+                of the surrounding fluid/gas. Defaults to 1.51147e-5.
+            gravitational_acceleration (float, optional): gravitational
+                acceleration. Defaults to 9.81.
         """
-        self.nu = config.fluid_kinematic_viscosity
-        self.beta = aspectRatio(config.a_perp, config.a_para)
-        particle_volume = particleVolume(config.a_perp, config.a_para)
-        self.a_perp = config.a_perp
-        self.a_para = config.a_para
+        self.nu = fluid_kinematic_viscosity
+        self.beta: float = aspectRatio(a_perp, a_para)
+        self.particle_volume = particleVolume(a_perp, a_para)
+        self.a_perp = a_perp
+        self.a_para = a_para
         self.F_lambda = shapeFactor(self.beta)
-        self.g = np.array([config.gravitational_acceleration, 0, 0])
-        self.m_p = particleMass(particle_volume, config.particle_density)
+        self.g = np.array([gravitational_acceleration, 0, 0])
+        self.m_p = particleMass(self.particle_volume, particle_density)
         self.tau_p = particleResponseTime(
-            config.a_perp,
-            config.a_para,
-            config.particle_density,
-            config.fluid_density,
-            config.fluid_kinematic_viscosity,
+            a_perp,
+            a_para,
+            particle_density,
+            fluid_density,
+            fluid_kinematic_viscosity,
         )
         self.W_approx = approximateSettlingSpeed(
-            config.a_perp,
-            config.a_para,
-            config.particle_density,
-            config.fluid_density,
-            config.fluid_kinematic_viscosity,
-            config.gravitational_acceleration,
+            a_perp,
+            a_para,
+            particle_density,
+            fluid_density,
+            fluid_kinematic_viscosity,
+            self.g,
         )
-        self.C_perp, self.C_para = rotationalResistanceCoefficients(config.a_perp, config.a_para)
+        self.C_perp, self.C_para = rotationalResistanceCoefficients(a_perp, a_para)
         self.A_perp, self.A_para = translationalResistanceCoefficients(self.beta)
         self.A_g = resistanceCoefficient(self.beta, self.A_perp, self.A_para)
         self.J_perp, self.J_para = particleInteriaTensorCoefficents(
-            config.a_perp,
-            config.a_para,
+            a_perp,
+            a_para,
             self.m_p,
         )
 
@@ -292,7 +301,6 @@ def translationalResistanceCoefficients(beta: float) -> Tuple[float, float]:
         Tuple[float, float]: coefficients in (perpendicular, parallel) direction
     """
     gamma = np.log(beta + np.sqrt(beta ** 2 - 1 + 0j)) / (beta * np.sqrt(beta ** 2 - 1 + 0j))
-    assert np.all(np.imag(gamma) < 1e-10), "Imaginary part of gamma should be zero"
     gamma = np.real(gamma)
     A_perp = 8 * (beta ** 2 - 1) / (3 * beta * ((2 * beta ** 2 - 3) * gamma + 1))
     A_para = 4 * (beta ** 2 - 1) / (3 * beta * ((2 * beta ** 2 - 1) * gamma - 1))
@@ -320,6 +328,26 @@ def rotationalResistanceCoefficients(a_perp: float, a_para: float) -> Tuple[floa
     C_para = - 8 * a_para * a_perp * (beta ** 2 - 1) \
         / (9 * (gamma - 1) * beta ** 2)
     return C_perp, C_para
+
+def selfConsistencyEqProlateC_F(C_F, A_perp, Re_p0, beta):
+    z = [0.18277810531719724, 0.229, 0.687, 0.75]
+    c_d = [-0.007, 1.0, 1.17, -0.07, 0.047, 1.14, 0.7, -0.008]
+    return + 1 - np.sqrt(1 + 3 * A_perp * C_F * Re_p0 / (2 * beta)) \
+        + 2 * (+ z[0] * beta ** z[1] * ((- 2 + np.sqrt(4 + 6 * A_perp \
+            * C_F * Re_p0 / beta)) / (A_perp * C_F)) ** z[2] + z[3] ** (-c_d[6] - c_d[7] \
+            * np.log(beta)) * c_d[4] * (beta ** (1 / 3) * (- 2 + np.sqrt(4 + 6 * A_perp \
+            * C_F * Re_p0 / beta)) / (A_perp * C_F)) ** (c_d[6] + c_d[7] * np.log(beta)) \
+            * np.log(beta) ** c_d[5] \
+        )
+
+def selfConsistencyEqOblateC_F(C_F, A_para, Re_p0, beta):
+    return (
+        A_para * (2 - np.sqrt(2) * np.sqrt(2 + 3 * A_para * C_F * Re_p0)) \
+        + 0.7311124212687891 * beta ** 96.47233333333332  * ((-2 + np.sqrt(4 + 6 * A_para \
+        * C_F * Re_p0)) / (A_para * C_F)) ** 0.687 + 1.453237823359436 \
+        * (1 - beta) ** 0.4374 * beta ** 0.5837333333333332 * ((-2 + np.sqrt(4 + 6 * A_para \
+        * C_F * Re_p0)) / (A_para * C_F)) ** 0.7512
+    )
 
 def correctionFactorStokesForce(
     Re_p0: float,
@@ -363,16 +391,10 @@ def correctionFactorStokesForce(
         # TODO: I cannot follow the calculation here.
         A_perp, _ = translationalResistanceCoefficients(beta)
         if full_solve:
-            def selfConsistencyEqProlateC_F(C_F):
-                return + 1 - np.sqrt(1 + 3 * A_perp * C_F * Re_p0 / (2 * beta)) \
-                    + 2 * (+ 0.18277810531719724 * beta ** 0.229 * ((- 2 + np.sqrt(4 + 6 * A_perp \
-                        * C_F * Re_p0 / beta)) / (A_perp * C_F)) ** 0.687 + 0.75 ** (-c_d[6] - c_d[7] \
-                        * np.log(beta)) * c_d[4] * (beta ** (1 / 3) * (- 2 + np.sqrt(4 + 6 * A_perp \
-                        * C_F * Re_p0 / beta)) / (A_perp * C_F)) ** (c_d[6] + c_d[7] * np.log(beta)) \
-                        * np.log(beta) ** c_d[5] \
-                    )
-
-            C_F = optimize.least_squares(fun=selfConsistencyEqProlateC_F, x0=1, bounds=(0.0, np.inf)).x[0]
+            C_F = optimize.least_squares(
+                fun=selfConsistencyEqProlateC_F,
+                x0=1, bounds=(0.0, np.inf),
+                args=(A_perp, Re_p0, beta,)).x[0]
         else:
             # TODO: Cannot verify formula for RE_JFM
             Re_correction = beta  ** (2 / 3) / 2
@@ -389,17 +411,9 @@ def correctionFactorStokesForce(
         # (phi=0), i.e. consider the drag coefficient
         _, A_para = translationalResistanceCoefficients(beta)
         if full_solve:
-            # TODO: Where does this formula come from?
-            def selfConsistencyEqOblateC_F(C_F):
-                return (
-                    A_para * (2 - np.sqrt(2) * np.sqrt(2 + 3 * A_para * C_F * Re_p0)) \
-                    + 0.7311124212687891 * beta ** 96.47233333333332  * ((-2 + np.sqrt(4 + 6 * A_para \
-                    * C_F * Re_p0)) / (A_para * C_F)) ** 0.687 + 1.453237823359436 \
-                    * (1 - beta) ** 0.4374 * beta ** 0.5837333333333332 * ((-2 + np.sqrt(4 + 6 * A_para \
-                    * C_F * Re_p0)) / (A_para * C_F)) ** 0.7512
-                )
-
-            C_F=optimize.least_squares(fun=selfConsistencyEqOblateC_F, x0=1, bounds=(0.0, np.inf)).x[0]
+            C_F=optimize.least_squares(
+                fun=selfConsistencyEqOblateC_F,
+                x0=1, bounds=(0.0, np.inf), args=(A_para, Re_p0, beta)).x[0]
         else:
             # TODO: Cannot verify formula for RE_JFM
             Re_correction = max(1, beta) / (2 * beta ** (1 / 3))
@@ -559,7 +573,7 @@ def systemDynamics(
     T_h0 = - (const.m_p / const.tau_p) * C @ omega
     T_h1 = const.F_lambda * (const.m_p / (6 * np.pi)) \
         * (a ** 3 * v_mag ** 2 / (const.a_perp * const.nu)) \
-        * (n @ v_hat) * np.cross(n , v_hat) / const.tau_p
+        * (n @ v_hat) * np.cross(n, v_hat) / const.tau_p
     # Compute correction factors
     Re_p0 = particleReynoldsNumber(const.a_perp, const.a_para, v_mag, const.nu)
     C_F = correctionFactorStokesForce(Re_p0, const.beta, full_solve=True)
@@ -571,9 +585,12 @@ def systemDynamics(
     T_h = T_h0 + C_T * T_h1
 
     # Particle interia tensor
-    J_pinverse = ((const.J_perp - const.J_para) * np.outer(n, n) + const.J_para * np.eye(3)) \
-            / (const.J_perp * const.J_para)
-    dJ_pdt = (const.J_para - const.J_perp) * (np.outer(n, omega) + np.outer(omega, n))
+    J_pinverse = (
+        (const.J_perp - const.J_para) * np.outer(n, n) + const.J_para * np.eye(3)
+    ) / (const.J_perp * const.J_para)
+    dJ_pdt = (const.J_para - const.J_perp) * (
+        np.outer(n, np.cross(omega, n)) + np.outer(np.cross(omega, n), n)
+    )
     # Derivatives of the system variables
     dxdt = v
     dvdt = F_h / const.m_p + const.g
