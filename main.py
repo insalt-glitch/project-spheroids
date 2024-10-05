@@ -7,6 +7,22 @@ from pathlib import Path
 
 FOLDER_FIGURES = Path("figures")
 
+class IntergateEvent:
+    buf_size = 100
+    buf = np.ones(buf_size)
+    buf_idx = 0
+
+    def reset():
+        IntergateEvent.buf_idx = 0
+        IntergateEvent.buf = np.ones(IntergateEvent.buf_size)
+
+def detect_steady_state(t, y, args) -> float:
+    IntergateEvent.buf[IntergateEvent.buf_idx] = np.linalg.norm(y[9:12])
+    IntergateEvent.buf_idx = (IntergateEvent.buf_idx + 1) % IntergateEvent.buf_size
+    return np.any(IntergateEvent.buf > 1e-5)
+
+detect_steady_state.terminal = True
+
 def plotCoefficientsVsReynoldsNumber(save=False):
     """Plot the coefficients C_F and C_T against the Reynolds number for testing
     """
@@ -49,12 +65,14 @@ def plotSettlingSpeedVsAspectRatio(save=False):
         n0 = n0 / np.linalg.norm(n0)
         a_perp, a_para = dynamics.spheriodDimensionsFromBeta(beta, const.particle_volume)
         const = dynamics.SystemConstants(a_perp=a_perp, a_para=a_para)
+        IntergateEvent.reset()
         solve_result = integrate.solve_ivp(
             fun=dynamics.systemDynamics,
             t_span=(0, 10.0,),
             y0=np.concat([[0, 0, 0], [0, 0, 1e-2], n0, [0, 0, 0]]),
             args=(const,),
             method="RK45",
+            events=detect_steady_state,
         )
         print(f"beta == {const.beta:.2f} | Steps == {solve_result.t.size}")
         if solve_result.status == 0:
@@ -228,27 +246,29 @@ def plotLowGravitySettlingSpeed(save=False):
     plt.show()
 
 if __name__ == '__main__':
-    const = dynamics.SystemConstants()
-    x0 = [0.1, 0.2, 0.3]
-    v0 = [5e-2, 7e-2, 3e-2]
-    n0 = np.array([1, 2, 3]) / np.linalg.norm([1,2,3])
-    omega0 = [0.13, 0.2, 0.78]
-    y0 = np.concat([x0, v0, n0, omega0])
-
-    solve_result = integrate.solve_ivp(
-        fun=dynamics.systemDynamics,
-        t_span=(0, 0.2,),
-        y0=y0,
-        args=(const,),
-        method="RK45",
-        rtol=1e-12,
-        atol=1e-12,
-    )
+    plotSettlingSpeedVsAspectRatio()
+    # const = dynamics.SystemConstants()
+    # x0 = [0.1, 0.2, 0.3]
+    # v0 = [5e-2, 7e-2, 3e-2]
+    # n0 = np.array([1, 2, 3]) / np.linalg.norm([1,2,3])
+    # omega0 = [0.13, 0.2, 0.78]
+    # y0 = np.concat([x0, v0, n0, omega0])
+    # solve_result = integrate.solve_ivp(
+    #     fun=dynamics.systemDynamics,
+    #     t_span=(0, 0.5),
+    #     y0=y0,
+    #     args=(const,),
+    #     method="RK45",
+    #     rtol=1e-12,
+    #     atol=1e-12,
+    #     events=detect_steady_state,
+    # )
     # n = solve_result.y[6:9]
     # phi = np.arccos(n[2]) * 180 / np.pi
     # print(f"n_final :: {n[:,-1]}")
-    plt.plot(solve_result.t, solve_result.y[9+0], ls=":", color="black", label="x")
-    plt.plot(solve_result.t, solve_result.y[9+1], ls="--",color="black",  label="y")
-    plt.plot(solve_result.t, solve_result.y[9+2], ls="solid", color="black", label="z")
-    plt.legend()
-    plt.show()
+    # plt.plot(solve_result.t, solve_result.y[9+0], ls=":", color="black", label="x")
+    # plt.plot(solve_result.t, solve_result.y[9+1], ls="--",color="black",  label="y")
+    # plt.plot(solve_result.t, solve_result.y[9+2], ls="solid", color="black", label="z")
+    # plt.legend()
+    # plt.tight_layout()
+    # plt.show()

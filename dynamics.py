@@ -1,7 +1,6 @@
 import numpy as np
-from scipy import optimize
 from scipy.interpolate import RectBivariateSpline
-from typing import Tuple, List
+from typing import Tuple
 
 class SystemConstants:
     def __init__(
@@ -53,10 +52,11 @@ class SystemConstants:
                 acceleration. Defaults to 9.81.
         """
         self.nu = fluid_kinematic_viscosity
-        self.beta: float = aspectRatio(a_perp, a_para)
+        self.beta = aspectRatio(a_perp, a_para)
         self.particle_volume = particleVolume(a_perp, a_para)
         self.a_perp = a_perp
         self.a_para = a_para
+        self.a = max(a_perp, a_para)
         self.F_lambda = shapeFactor(self.beta)
         self.g = np.array([gravitational_acceleration, 0, 0])
         self.m_p = particleMass(self.particle_volume, particle_density)
@@ -82,6 +82,28 @@ class SystemConstants:
             a_perp,
             a_para,
             self.m_p,
+        )
+        # derived constants for precomputation
+        self._A_diff = self.A_para - self.A_perp
+        self._C_diff = self.C_para - self.C_perp
+        self._fac_TF_h0 = - (self.m_p / self.tau_p)
+        self._fac_F_h1 = - (3 / 16) * (self.m_p / self.tau_p) * (self.a_perp / self.nu)
+        self._fac_T_h1 = self.F_lambda * (self.m_p / (6 * np.pi)) \
+            * (self.a ** 3 / (self.a_perp * self.nu)) / self.tau_p
+        self._J_diff = self.J_perp - self.J_para
+        self._fac_Re_p0 = self.a / self.nu
+        self._fac1_v_g_star = 4 * self.nu / (3 * self.a_perp * self.A_g)
+        self._fac2_v_g_star = 3 * self.a_perp * np.linalg.norm(self.g) * self.tau_p / (2 * self.nu)
+        self._C_F_oblate_c0 = 0.7311124212687891 * self.beta ** 96.47233333333332
+        self._C_F_oblate_c1 = np.real(1.453237823359436 * (1 - self.beta + 0j) ** 0.4374 * self.beta ** 0.5837333333333332)
+        # Empirical correlation coefficients (Page 32 - Table 5 c_{d,i}) Fröhlich JFM 901 (2020)
+        self._c_d = [-0.007, 1.0, 1.17, -0.07, 0.047, 1.14, 0.7, -0.008]
+        self._C_F_prolate_c0 = self._c_d[6] + self._c_d[7] * np.log(self.beta)
+        self._C_F_prolate_c1 = np.real(2 * 0.18277810531719724 * (self.beta + 0j) ** 0.229)
+        self._C_F_prolate_c2 = np.real(
+            2 * 0.75 ** (-self._C_F_prolate_c0) * self._c_d[4]
+            * self.beta ** (self._C_F_prolate_c0 / 3)
+            * np.log(self.beta + 0j) ** self._c_d[5]
         )
 
 def particleVolume(a_perp: float, a_para: float) -> float:
@@ -329,29 +351,46 @@ def rotationalResistanceCoefficients(a_perp: float, a_para: float) -> Tuple[floa
         / (9 * (gamma - 1) * beta ** 2)
     return C_perp, C_para
 
-def selfConsistencyEqProlateC_F(C_F, A_perp, Re_p0, beta):
-    z = [0.18277810531719724, 0.229, 0.687, 0.75]
-    c_d = [-0.007, 1.0, 1.17, -0.07, 0.047, 1.14, 0.7, -0.008]
-    return + 1 - np.sqrt(1 + 3 * A_perp * C_F * Re_p0 / (2 * beta)) \
-        + 2 * (+ z[0] * beta ** z[1] * ((- 2 + np.sqrt(4 + 6 * A_perp \
-            * C_F * Re_p0 / beta)) / (A_perp * C_F)) ** z[2] + z[3] ** (-c_d[6] - c_d[7] \
-            * np.log(beta)) * c_d[4] * (beta ** (1 / 3) * (- 2 + np.sqrt(4 + 6 * A_perp \
-            * C_F * Re_p0 / beta)) / (A_perp * C_F)) ** (c_d[6] + c_d[7] * np.log(beta)) \
-            * np.log(beta) ** c_d[5] \
-        )
+def selfConsistencyEqProlateC_F(C_F, A_perp, Re_p0, beta, c0, c1, c2):
+    A_CF_Re = 6 * A_perp * C_F * Re_p0 / beta
+    sqrtTerm = (- 2 + np.sqrt(4 + A_CF_Re)) / (A_perp * C_F)
+    return + 1 - np.sqrt(1 + 0.25 * A_CF_Re) + c1 * sqrtTerm ** 0.687 + c2 * sqrtTerm ** c0
 
-def selfConsistencyEqOblateC_F(C_F, A_para, Re_p0, beta):
+def selfConsistencyEqOblateC_F(C_F, A_para, Re_p0, c0, c1):
+    A_CF_Re = A_para * C_F * Re_p0
+    sqrt_term = (-2 + np.sqrt(4 + 6 * A_CF_Re)) / (A_para * C_F)
     return (
-        A_para * (2 - np.sqrt(2) * np.sqrt(2 + 3 * A_para * C_F * Re_p0)) \
-        + 0.7311124212687891 * beta ** 96.47233333333332  * ((-2 + np.sqrt(4 + 6 * A_para \
-        * C_F * Re_p0)) / (A_para * C_F)) ** 0.687 + 1.453237823359436 \
-        * (1 - beta) ** 0.4374 * beta ** 0.5837333333333332 * ((-2 + np.sqrt(4 + 6 * A_para \
-        * C_F * Re_p0)) / (A_para * C_F)) ** 0.7512
+        A_para * (2 - 1.4142135623730951 * np.sqrt(2 + 3 * A_CF_Re))
+        + c0 * sqrt_term ** 0.687 + c1 * sqrt_term ** 0.7512
     )
+
+def selfConsistencyEqProlateC_FDerivative(C_F, A_perp, Re_p0, beta, c0, c1, c2):
+    sqrtTerm = (- 2 + np.sqrt(4 + (6 * A_perp * Re_p0 * C_F) / beta))
+    term2 = ((3 * Re_p0) / (beta * C_F * np.sqrt(4 + (6 * A_perp * Re_p0 * C_F) / beta)) - sqrtTerm / (A_perp * C_F ** 2))
+    return (
+        - ((3 * A_perp * 0.25 * Re_p0) / (beta * np.sqrt(1 + 0.25 * (6 * A_perp
+        * Re_p0 * C_F) / beta))) + c0 * c2 * (sqrtTerm / (A_perp * C_F)) ** (- 1 + c0)
+        * term2 + c1 * 0.687 * (sqrtTerm / (A_perp * C_F)) ** (- 1 + 0.687) * term2
+    )
+
+def selfConsistencyEqOblateC_FDerivative(C_F, A_para, Re_p0, c0, c1):
+    sqrtTerm = ((-2 + np.sqrt(4 + 6 * A_para * Re_p0 * C_F)) / (A_para * C_F))
+    sqrtTerm2 = np.sqrt(2 + 3 * A_para * Re_p0 * C_F)
+    return (
+        -3 * A_para ** 2 * 1.4142135623730951 * Re_p0 * C_F + (np.sqrt(2)
+        - sqrtTerm2) * (c0 * 0.687 * sqrtTerm ** 0.687 + c1 * 0.7512
+        * sqrtTerm ** 0.7512)
+    ) / (2 * C_F * sqrtTerm2)
+
+def newtonC_F(x0, f, f_prime, args):
+    x = x0
+    for i in range(5):
+        x = x - f(x, *args) / f_prime(x, *args)
+    return x
 
 def correctionFactorStokesForce(
     Re_p0: float,
-    beta: float,
+    const: SystemConstants,
     full_solve: bool = False,
 ) -> float:
     """Calculate correction factor for the Stokes force
@@ -374,11 +413,10 @@ def correctionFactorStokesForce(
     if Re_p0 <= 1:
         C_F = 1
         return C_F
-    if beta >= 1:  # beta > 1 -> prolate spheroid
+    A_perp, A_para = translationalResistanceCoefficients(const.beta)
+    if const.beta >= 1:  # beta > 1 -> prolate spheroid
         # The following formulas are discussed in Fröhlich JFM 901 (2020):
         #   https://doi.org/10.1017/jfm.2020.482
-        # Empirical correlation coefficients (Page 32 - Table 5 c_{d,i})
-        c_d = [-0.007, 1.0, 1.17, -0.07, 0.047, 1.14, 0.7, -0.008]
         # Consider rod-like particles aligned with the steady state direction
         # (phi=pi/2), i.e. consider the drag coefficient (Page 19 - Section 3.3.1 - Eq. 3.4b)
         #   C_{D,90}(Re,beta)=C_{D,Stokes,90}(Re,beta)*f_{d,90}(Re,beta)
@@ -389,46 +427,57 @@ def correctionFactorStokesForce(
         #                     =1+C_F*3*A_perp*Rep/(8*beta)
         # => C_F=8*beta*(0.15*ReJFM^0.687+c_{d,5}*log(beta)^c_{d,6}*ReJFM^(c_{d,7}+c{d,8}*log(beta)))/(3*A_perp*Rep)
         # TODO: I cannot follow the calculation here.
-        A_perp, _ = translationalResistanceCoefficients(beta)
         if full_solve:
-            C_F = optimize.least_squares(
-                fun=selfConsistencyEqProlateC_F,
-                x0=1, bounds=(0.0, np.inf),
-                args=(A_perp, Re_p0, beta,)).x[0]
+            C_F = newtonC_F(
+                x0=1,
+                f=selfConsistencyEqProlateC_F,
+                f_prime=selfConsistencyEqProlateC_FDerivative,
+                args=(
+                    A_perp, Re_p0, const.beta,
+                    const._C_F_prolate_c0,
+                    const._C_F_prolate_c1,
+                    const._C_F_prolate_c2,
+            ))
         else:
             # TODO: Cannot verify formula for RE_JFM
-            Re_correction = beta  ** (2 / 3) / 2
+            Re_correction = const.beta  ** (2 / 3) / 2
             Re_JFM = Re_p0 / Re_correction
+            # Empirical correlation coefficients (Page 32 - Table 5 c_{d,i})
             # This approximation of C_F is obtained by rearranging the formula given
             # above (cmp. f_{d,90}(Re,beta)=...)
-            C_F = 8 * beta * (
+            C_F = 8 * const.beta * (
                 + 0.15 * Re_JFM ** 0.687
-                + c_d[4] * np.log(beta) ** c_d[5] * Re_JFM ** (c_d[6] + c_d[7] * np.log(beta))
+                + const._c_d[4] * np.log(const.beta) ** const._c_d[5] * Re_JFM ** (const._c_d[6] + const._c_d[7] * np.log(const.beta))
             ) / (3 * A_perp * Re_p0)
     else:  # beta < 1 -> oblate spheroid
         # Use Ouchene (2020) for interpolated coefficient : https://doi.org/10.1063/5.0011618
         # Consider disk-like particles aligned with the steady state direction
         # (phi=0), i.e. consider the drag coefficient
-        _, A_para = translationalResistanceCoefficients(beta)
         if full_solve:
-            C_F=optimize.least_squares(
-                fun=selfConsistencyEqOblateC_F,
-                x0=1, bounds=(0.0, np.inf), args=(A_para, Re_p0, beta)).x[0]
+            C_F = newtonC_F(
+                x0=1,
+                f=selfConsistencyEqOblateC_F,
+                f_prime=selfConsistencyEqOblateC_FDerivative,
+                args=(
+                    A_perp, Re_p0,
+                    const._C_F_oblate_c0,
+                    const._C_F_oblate_c1,
+            ))
         else:
             # TODO: Cannot verify formula for RE_JFM
-            Re_correction = max(1, beta) / (2 * beta ** (1 / 3))
+            Re_correction = max(1, const.beta) / (2 * const.beta ** (1 / 3))
             Re_JFM = Re_p0 / Re_correction
             # K_phi0 is defined in Ouchene (2020) (Page 4 - Eq. 13)
-            K_phi0 = (8 / 3) * beta ** (-1 / 3) / (
-                + 2 * beta / (1 - beta ** 2)
-                + 2 * (1 - 2 * beta ** 2) / (1 - beta ** 2) ** (3 / 2) * np.arctan(np.sqrt(1 - beta ** 2) / beta)
+            K_phi0 = (8 / 3) * const.beta ** (-1 / 3) / (
+                + 2 * const.beta / (1 - const.beta ** 2)
+                + 2 * (1 - 2 * const.beta ** 2) / (1 - const.beta ** 2) ** (3 / 2) * np.arctan(np.sqrt(1 - const.beta ** 2) / const.beta)
             )
             # This approximation of C_F is obtained by rearranging the formula given
             # above (cmp. f_{d,90}(Re,beta)=...) (Fröhlich (2020)) but using the C_{D,0}(Re,beta)
             # from Ouchene (2020) (Page 6 - Eq. 18)
             C_F= 8 * (
-                + 0.15 * beta ** 95.91 * Re_JFM ** 0.687
-                + 0.2927 * (1 - beta) ** 0.4374 * Re_JFM ** 0.7512
+                + 0.15 * const.beta ** 95.91 * Re_JFM ** 0.687
+                + 0.2927 * (1 - const.beta) ** 0.4374 * Re_JFM ** 0.7512
             ) / K_phi0 / (3 * A_para * Re_p0)
     return C_F
 
@@ -559,36 +608,30 @@ def systemDynamics(
 
     v_mag = np.linalg.norm(v)
     v_hat = v / v_mag
-    a = max(const.a_perp, const.a_para)
     # A = Translation resistance tensor
     # C = Rotation resistance tensor
-    A = const.A_perp * np.eye(3) + (const.A_para - const.A_perp) * np.outer(n, n)
-    C = const.C_perp * np.eye(3) + (const.C_para - const.C_perp) * np.outer(n, n)
+    A = const.A_perp * np.eye(3) + const._A_diff * np.outer(n, n)
+    C = const.C_perp * np.eye(3) + const._C_diff * np.outer(n, n)
     # Stokes force + correction for higher particle Reynolds numbers (Re_p ~ 1 - 30)
-    F_h0 = - (const.m_p / const.tau_p) * (A @ v)
-    F_h1 = - (3 / 16) * (const.m_p / const.tau_p) * \
-        (const.a_perp * v_mag / const.nu) * \
-        (3 * A - np.identity(3) * (v_hat @ A @ v_hat)) @ A @ v
+    F_h0 = const._fac_TF_h0 * (A @ v)
+    F_h1 = const._fac_F_h1 * v_mag * (3 * A - np.eye(3) * (v_hat @ A @ v_hat)) @ A @ v
     # Torque + correction for higher particle Reynolds numbers (Re_p ~ 1 - 30)
-    T_h0 = - (const.m_p / const.tau_p) * C @ omega
-    T_h1 = const.F_lambda * (const.m_p / (6 * np.pi)) \
-        * (a ** 3 * v_mag ** 2 / (const.a_perp * const.nu)) \
-        * (n @ v_hat) * np.cross(n, v_hat) / const.tau_p
+    T_h0 = const._fac_TF_h0 * C @ omega
+    T_h1 = const._fac_T_h1 * (n @ v) * np.cross(n, v)
     # Compute correction factors
-    Re_p0 = particleReynoldsNumber(const.a_perp, const.a_para, v_mag, const.nu)
-    C_F = correctionFactorStokesForce(Re_p0, const.beta, full_solve=True)
-    v_g_star = steadyStateSettlingSpeed(C_F, const.a_perp, const.tau_p, const.A_g, const.nu, const.g)
-    Re_p = particleReynoldsNumber(const.a_perp, const.a_para, v_g_star, const.nu)
+    Re_p0 = const._fac_Re_p0 * v_mag
+    C_F = correctionFactorStokesForce(Re_p0, const, full_solve=True)
+    v_g_star = const._fac1_v_g_star * (np.sqrt(1 + const._fac2_v_g_star * C_F) - 1) / C_F
+    Re_p = const._fac_Re_p0 * v_g_star
     C_T = correctionFactorTorque(Re_p, const.beta, const.F_lambda)
     # Full terms for torque and stokes force
     F_h = F_h0 + C_F * F_h1
     T_h = T_h0 + C_T * T_h1
-
     # Particle interia tensor
     J_pinverse = (
-        (const.J_perp - const.J_para) * np.outer(n, n) + const.J_para * np.eye(3)
+        const._J_diff * np.outer(n, n) + const.J_para * np.eye(3)
     ) / (const.J_perp * const.J_para)
-    dJ_pdt = (const.J_para - const.J_perp) * (
+    dJ_pdt = - const._J_diff * (
         np.outer(n, np.cross(omega, n)) + np.outer(np.cross(omega, n), n)
     )
     # Derivatives of the system variables
