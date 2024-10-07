@@ -105,6 +105,36 @@ class SystemConstants:
             * self.beta ** (self._C_F_prolate_c0 / 3)
             * np.log(self.beta + 0j) ** self._c_d[5]
         )
+        # The following formulas are discussed in Fröhlich JFM 901 (2020):
+        #   https://doi.org/10.1017/jfm.2020.482
+        # Empirical correlation coefficients (Page 32 - Table 5 c_{t,i})
+        self._c_t = [0.931, 0.675, 0.162, 0.657, 2.77, 0.178, 0.177]
+        self._C_T_prolate_c0 = self._c_t[5] + self._c_t[6] * np.log(self.beta)
+        self._C_T_prolate_c1 = np.real(
+            self._c_t[0] * np.log(self.beta + 0j) ** self._c_t[1]
+            * (self.beta ** (2 / 3) / 2) ** self._c_t[2] * np.pi
+            / (self.beta ** 2 * np.abs(self.F_lambda))
+        )
+        self._C_T_prolate_c2 = np.real(
+            self._c_t[3] * np.log(self.beta + 0j) ** self._c_t[4]
+            * (self.beta ** (2 / 3) / 2) ** self._C_T_prolate_c0 * np.pi
+            / (self.beta ** 2 * np.abs(self.F_lambda))
+        )
+        self._C_T_oblate_c0 = np.real(
+            np.pi * self.beta / (max(1, self.beta) ** 3) * 1.85
+            * ((1 - self.beta + 0j) / self.beta) ** 0.832 * (max(1, self.beta)
+            / (2 * self.beta ** (1 / 3))) ** 0.146
+            / (2 * np.abs(self.F_lambda))
+        )
+
+def spheriodDimensionsFromBeta(beta: float, particle_volume: float) -> Tuple[float, float]:
+    # beta = a_para / a_perp
+    #     V = 4 / 3 * np.pi * a_perp ** 2 * a_para
+    # <=> V = 4 / 3 * np.pi * a_perp ** 3 * beta
+    # <=> a_perp = V / (4 / 3 * np.pi * beta) ** (1 / 3)
+    a_perp = (particle_volume / (4 / 3 * np.pi * beta)) ** (1 / 3)
+    a_para = beta * a_perp
+    return a_perp, a_para
 
 def particleVolume(a_perp: float, a_para: float) -> float:
     """Calculate volume of the particle from its radii along and perpendicular
@@ -413,7 +443,7 @@ def correctionFactorStokesForce(
     if Re_p0 <= 1:
         C_F = 1
         return C_F
-    A_perp, A_para = translationalResistanceCoefficients(const.beta)
+
     if const.beta >= 1:  # beta > 1 -> prolate spheroid
         # The following formulas are discussed in Fröhlich JFM 901 (2020):
         #   https://doi.org/10.1017/jfm.2020.482
@@ -433,7 +463,7 @@ def correctionFactorStokesForce(
                 f=selfConsistencyEqProlateC_F,
                 f_prime=selfConsistencyEqProlateC_FDerivative,
                 args=(
-                    A_perp, Re_p0, const.beta,
+                    const.A_perp, Re_p0, const.beta,
                     const._C_F_prolate_c0,
                     const._C_F_prolate_c1,
                     const._C_F_prolate_c2,
@@ -448,7 +478,7 @@ def correctionFactorStokesForce(
             C_F = 8 * const.beta * (
                 + 0.15 * Re_JFM ** 0.687
                 + const._c_d[4] * np.log(const.beta) ** const._c_d[5] * Re_JFM ** (const._c_d[6] + const._c_d[7] * np.log(const.beta))
-            ) / (3 * A_perp * Re_p0)
+            ) / (3 * const.A_perp * Re_p0)
     else:  # beta < 1 -> oblate spheroid
         # Use Ouchene (2020) for interpolated coefficient : https://doi.org/10.1063/5.0011618
         # Consider disk-like particles aligned with the steady state direction
@@ -459,7 +489,7 @@ def correctionFactorStokesForce(
                 f=selfConsistencyEqOblateC_F,
                 f_prime=selfConsistencyEqOblateC_FDerivative,
                 args=(
-                    A_perp, Re_p0,
+                    const.A_perp, Re_p0,
                     const._C_F_oblate_c0,
                     const._C_F_oblate_c1,
             ))
@@ -478,13 +508,12 @@ def correctionFactorStokesForce(
             C_F= 8 * (
                 + 0.15 * const.beta ** 95.91 * Re_JFM ** 0.687
                 + 0.2927 * (1 - const.beta) ** 0.4374 * Re_JFM ** 0.7512
-            ) / K_phi0 / (3 * A_para * Re_p0)
+            ) / K_phi0 / (3 * const.A_para * Re_p0)
     return C_F
 
 def correctionFactorTorque(
     Re_p: float,
-    beta: float,
-    shape_factor: float,
+    const: SystemConstants,
     do_ouchene_disks=True,
 ) -> float:
     """Calculate the correction factor for the torque
@@ -506,41 +535,42 @@ def correctionFactorTorque(
         C_T = 1
         return C_T
 
-    if beta > 1:  # beta > 1 -> prolate spheroid
+    if const.beta > 1:  # beta > 1 -> prolate spheroid
+        C_T = const._C_T_prolate_c1 * Re_p ** (-const._c_t[2]) + const._C_T_prolate_c2 * Re_p ** (-const._C_T_prolate_c0)
         # The following formulas are discussed in Fröhlich JFM 901 (2020):
         #   https://doi.org/10.1017/jfm.2020.482
         # Empirical correlation coefficients (Page 32 - Table 5 c_{t,i})
-        c_t = [0.931, 0.675, 0.162, 0.657, 2.77, 0.178, 0.177]
-
-        # TODO: Cannot verify this formula
-        Re_correction = beta ** (2 / 3) / 2
-        Re_JFM = Re_p / Re_correction
-        # TODO: Where does this formula come from?
-        # TODO: In Fröhlich (2020) (Page 24 - Eq. 3.16a) where is an additional
-        #       cos(phi) term which would be zero?!
-        C_JFM = (
-            +c_t[0] * np.log(beta) ** c_t[1] / (Re_JFM ** c_t[2])
-            +c_t[3] * np.log(beta) ** c_t[4] / (Re_JFM ** (c_t[5] + c_t[6] * np.log(beta)))
-        )
-        # TODO: Where where do these formulas (& corrections) come from?
-        C_correction = np.pi / (2 * beta ** 2)
-        C_Re = C_JFM * C_correction
-        # Original coefficient
-        C_0 = np.abs(shape_factor) / 2
-        C_T = C_Re / C_0
+        # c_t = [0.931, 0.675, 0.162, 0.657, 2.77, 0.178, 0.177]
+        # # TODO: Cannot verify this formula
+        # Re_correction = beta ** (2 / 3) / 2
+        # Re_JFM = Re_p / Re_correction
+        # # TODO: Where does this formula come from?
+        # # TODO: In Fröhlich (2020) (Page 24 - Eq. 3.16a) where is an additional
+        # #       cos(phi) term which would be zero?!
+        # C_JFM = (
+        #     +c_t[0] * np.log(beta) ** c_t[1] / (Re_JFM ** c_t[2])
+        #     +c_t[3] * np.log(beta) ** c_t[4] / (Re_JFM ** (c_t[5] + c_t[6] * np.log(beta)))
+        # )
+        # # TODO: Where where do these formulas (& corrections) come from?
+        # C_correction = np.pi / (2 * beta ** 2)
+        # C_Re = C_JFM * C_correction
+        # # Original coefficient
+        # C_0 = np.abs(shape_factor) / 2
+        # C_T = C_Re / C_0
     else:  # beta < 1 -> oblate spheroid
         if do_ouchene_disks:
-            # Use Ouchene (2020) for interpolated coefficient : https://doi.org/10.1063/5.0011618
-            Re_correction = max(1, beta) / (2 * beta ** (1 / 3))
-            Re_PF = Re_p / Re_correction
-            # Ouchene (2020) for phi = pi / 4 (Page 9 - Eq. 24):
-            C_PF = 1.85 * ((1 - beta) / beta) ** 0.832 / (2 * Re_PF ** 0.146)
-            # Coefficient corrected for finite Re
-            C_correction = np.pi * beta / (2 * max(1, beta) ** 3)
-            C_Re = C_correction * C_PF
-            # Original coefficient
-            C_0 = np.abs(shape_factor) / 2
-            C_T = C_Re / C_0
+            C_T =  const._C_T_oblate_c0 * Re_p ** (-0.146)
+            # # Use Ouchene (2020) for interpolated coefficient : https://doi.org/10.1063/5.0011618
+            # Re_correction = max(1, beta) / (2 * beta ** (1 / 3))
+            # Re_PF = Re_p / Re_correction
+            # # Ouchene (2020) for phi = pi / 4 (Page 9 - Eq. 24):
+            # C_PF = 1.85 * ((1 - beta) / beta) ** 0.832 / (2 * Re_PF ** 0.146)
+            # # Coefficient corrected for finite Re
+            # C_correction = np.pi * beta / (2 * max(1, beta) ** 3)
+            # C_Re = C_correction * C_PF
+            # # Original coefficient
+            # C_0 = np.abs(shape_factor) / 2
+            # C_T = C_Re / C_0
         else:
             # Interpolation with data from Jiang (2021) https://doi.org/10.1103/PhysRevFluids.6.024302
             # TODO: What is 'C_TS'
@@ -555,7 +585,7 @@ def correctionFactorTorque(
             ])
             # performs 2D linear interpolation
             bivariate_obj = RectBivariateSpline(arr_Re_p, arr_beta, C_TS, kx=1, ky=1)
-            C_T = np.squeeze(bivariate_obj(Re_p, beta))
+            C_T = np.squeeze(bivariate_obj(Re_p, const.beta))
     return C_T
 
 def particleInteriaTensorCoefficents(
@@ -623,7 +653,7 @@ def systemDynamics(
     C_F = correctionFactorStokesForce(Re_p0, const, full_solve=True)
     v_g_star = const._fac1_v_g_star * (np.sqrt(1 + const._fac2_v_g_star * C_F) - 1) / C_F
     Re_p = const._fac_Re_p0 * v_g_star
-    C_T = correctionFactorTorque(Re_p, const.beta, const.F_lambda)
+    C_T = correctionFactorTorque(Re_p, const)
     # Full terms for torque and stokes force
     F_h = F_h0 + C_F * F_h1
     T_h = T_h0 + C_T * T_h1
@@ -641,12 +671,3 @@ def systemDynamics(
     domegadt = J_pinverse @ (T_h - dJ_pdt @ omega)
     state_derivative = np.concat([dxdt, dvdt, dndt, domegadt])
     return state_derivative
-
-def spheriodDimensionsFromBeta(beta: float, particle_volume: float) -> Tuple[float, float]:
-    # beta = a_para / a_perp
-    #     V = 4 / 3 * np.pi * a_perp ** 2 * a_para
-    # <=> V = 4 / 3 * np.pi * a_perp ** 3 * beta
-    # <=> a_perp = V / (4 / 3 * np.pi * beta) ** (1 / 3)
-    a_perp = (particle_volume / (4 / 3 * np.pi * beta)) ** (1 / 3)
-    a_para = beta * a_perp
-    return a_perp, a_para

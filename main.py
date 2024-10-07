@@ -3,7 +3,9 @@ from scipy import integrate
 import matplotlib.pyplot as plt
 import matplotlib
 import dynamics
+import c_dynamics
 from pathlib import Path
+from tqdm import tqdm
 
 FOLDER_FIGURES = Path("figures")
 
@@ -60,26 +62,25 @@ def plotSettlingSpeedVsAspectRatio(save=False):
         np.logspace(np.log10(1.1), np.log10(6), num=num_points),
     ])
     v_g_arr = []
-    for beta in betas:
+    for beta in tqdm(betas):
         n0 = np.random.default_rng(0).normal(size=3)
         n0 = n0 / np.linalg.norm(n0)
         a_perp, a_para = dynamics.spheriodDimensionsFromBeta(beta, const.particle_volume)
         const = dynamics.SystemConstants(a_perp=a_perp, a_para=a_para)
+        c_config = c_dynamics.CppConfig(const)
         IntergateEvent.reset()
         solve_result = integrate.solve_ivp(
-            fun=dynamics.systemDynamics,
+            fun=c_dynamics.systemDynamics,
             t_span=(0, 10.0,),
             y0=np.concat([[0, 0, 0], [0, 0, 1e-2], n0, [0, 0, 0]]),
-            args=(const,),
+            args=(c_config,),
             method="RK45",
             events=detect_steady_state,
         )
-        print(f"beta == {const.beta:.2f} | Steps == {solve_result.t.size}")
         if solve_result.status == 0:
             v = np.linalg.norm(solve_result.y[3:6], axis=0)
             v_g_arr.append(np.mean(v[-10:]))
             v_g_std = np.std(v[-10:]) / np.sqrt(10)
-            print(f"settling velocity == ({v_g_arr[-1]:.2f}+-{v_g_std:.1e})m/s")
         else:
             print(f"Status ({solve_result.status}) :: {solve_result.message}")
             break
@@ -248,27 +249,30 @@ def plotLowGravitySettlingSpeed(save=False):
 if __name__ == '__main__':
     plotSettlingSpeedVsAspectRatio()
     # const = dynamics.SystemConstants()
+    # c_config = c_dynamics.CppConfig(const)
+
     # x0 = [0.1, 0.2, 0.3]
     # v0 = [5e-2, 7e-2, 3e-2]
     # n0 = np.array([1, 2, 3]) / np.linalg.norm([1,2,3])
     # omega0 = [0.13, 0.2, 0.78]
     # y0 = np.concat([x0, v0, n0, omega0])
+
     # solve_result = integrate.solve_ivp(
-    #     fun=dynamics.systemDynamics,
+    #     fun=c_dynamics.systemDynamics,
     #     t_span=(0, 0.5),
     #     y0=y0,
-    #     args=(const,),
+    #     args=(c_config,),
     #     method="RK45",
     #     rtol=1e-12,
     #     atol=1e-12,
     #     events=detect_steady_state,
     # )
-    # n = solve_result.y[6:9]
-    # phi = np.arccos(n[2]) * 180 / np.pi
-    # print(f"n_final :: {n[:,-1]}")
     # plt.plot(solve_result.t, solve_result.y[9+0], ls=":", color="black", label="x")
     # plt.plot(solve_result.t, solve_result.y[9+1], ls="--",color="black",  label="y")
     # plt.plot(solve_result.t, solve_result.y[9+2], ls="solid", color="black", label="z")
     # plt.legend()
     # plt.tight_layout()
     # plt.show()
+    # n = solve_result.y[6:9]
+    # phi = np.arccos(n[2]) * 180 / np.pi
+    # print(f"n_final :: {n[:,-1]}")
