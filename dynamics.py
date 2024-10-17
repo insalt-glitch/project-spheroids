@@ -51,6 +51,8 @@ class SystemConstants:
             gravitational_acceleration (float, optional): gravitational
                 acceleration. Defaults to 9.81.
         """
+        self.rho_p = particle_density
+        self.rho_f = fluid_density
         self.nu = fluid_kinematic_viscosity
         self.beta = aspectRatio(a_perp, a_para)
         self.particle_volume = particleVolume(a_perp, a_para)
@@ -658,7 +660,7 @@ def systemDynamics(
     F_h = F_h0 + C_F * F_h1
     T_h = T_h0 + C_T * T_h1
     # Particle interia tensor
-    J_pinverse = (
+    J_inverse = (
         const._J_diff * np.outer(n, n) + const.J_para * np.eye(3)
     ) / (const.J_perp * const.J_para)
     dJ_pdt = - const._J_diff * (
@@ -668,6 +670,6 @@ def systemDynamics(
     dxdt = v
     dvdt = F_h / const.m_p + const.g
     dndt = np.cross(omega, n)
-    domegadt = J_pinverse @ (T_h - dJ_pdt @ omega)
+    domegadt = J_inverse @ (T_h - dJ_pdt @ omega)
     state_derivative = np.concat([dxdt, dvdt, dndt, domegadt])
     return state_derivative

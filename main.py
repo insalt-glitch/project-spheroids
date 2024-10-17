@@ -55,6 +55,7 @@ def plotCoefficientsVsReynoldsNumber(save=False):
     plt.show()
 
 def plotSettlingSpeedVsAspectRatio(save=False):
+    rng = np.random.default_rng(0)
     const = dynamics.SystemConstants()
     num_points = 20
     betas = np.hstack([
@@ -63,7 +64,7 @@ def plotSettlingSpeedVsAspectRatio(save=False):
     ])
     v_g_arr = []
     for beta in tqdm(betas):
-        n0 = np.random.default_rng(0).normal(size=3)
+        n0 = rng.normal(size=3)
         n0 = n0 / np.linalg.norm(n0)
         a_perp, a_para = dynamics.spheriodDimensionsFromBeta(beta, const.particle_volume)
         const = dynamics.SystemConstants(a_perp=a_perp, a_para=a_para)
@@ -246,33 +247,44 @@ def plotLowGravitySettlingSpeed(save=False):
         plt.savefig(FOLDER_FIGURES / "settling_speed-vs-low_gravity.png", dpi=500, bbox_inches="tight")
     plt.show()
 
+def discriminantDelta(const: dynamics.SystemConstants):
+    v_scale = np.linalg.norm(const.g) * const.tau_p / const.A_g
+    vg_nondim = const.W_approx / v_scale
+    Re_p0 = dynamics.particleReynoldsNumber(const.a_perp, const.a_para, const.W_approx, const.nu)
+    C_T = dynamics.correctionFactorTorque(Re_p0, const)
+    curly_R = const.rho_p / const.rho_f
+    curly_V = np.linalg.norm(const.g) * const.particle_volume / const.nu ** 2
+    delta = 1 - 4 * vg_nondim ** 2 * C_T * curly_R ** 3 * curly_V ** 2
+
 if __name__ == '__main__':
-    plotSettlingSpeedVsAspectRatio()
-    # const = dynamics.SystemConstants()
-    # c_config = c_dynamics.CppConfig(const)
+    # plotSettlingSpeedVsAspectRatio()
+    fac = 4
+    const = dynamics.SystemConstants()
+    const = dynamics.SystemConstants(a_para=const.a_para * fac, a_perp=const.a_perp * fac)
 
-    # x0 = [0.1, 0.2, 0.3]
-    # v0 = [5e-2, 7e-2, 3e-2]
-    # n0 = np.array([1, 2, 3]) / np.linalg.norm([1,2,3])
-    # omega0 = [0.13, 0.2, 0.78]
-    # y0 = np.concat([x0, v0, n0, omega0])
+    x0 = [0.1, 0.2, 0.3]
+    v0 = [5e-2, 7e-2, 3e-2]
+    n0 = np.array([1, 2, 3]) / np.linalg.norm([1,2,3])
+    omega0 = [0.13, 0.2, 0.78]
+    y0 = np.concat([x0, v0, n0, omega0])
 
-    # solve_result = integrate.solve_ivp(
-    #     fun=c_dynamics.systemDynamics,
-    #     t_span=(0, 0.5),
-    #     y0=y0,
-    #     args=(c_config,),
-    #     method="RK45",
-    #     rtol=1e-12,
-    #     atol=1e-12,
-    #     events=detect_steady_state,
-    # )
-    # plt.plot(solve_result.t, solve_result.y[9+0], ls=":", color="black", label="x")
-    # plt.plot(solve_result.t, solve_result.y[9+1], ls="--",color="black",  label="y")
-    # plt.plot(solve_result.t, solve_result.y[9+2], ls="solid", color="black", label="z")
-    # plt.legend()
-    # plt.tight_layout()
-    # plt.show()
-    # n = solve_result.y[6:9]
-    # phi = np.arccos(n[2]) * 180 / np.pi
-    # print(f"n_final :: {n[:,-1]}")
+    t = np.linspace(0.0, 100.0, num=10_000)
+    res = c_dynamics.solveDynamics(
+        y0, t,
+        const,
+        rel_tol=1e-12,
+        abs_tol=1e-12
+    )
+    res = res.T
+    n = res[6:9]
+    plt.plot(t, res[9+0], alpha=0.4, label="$\\omega_x$")
+    plt.plot(t, res[9+1], alpha=0.4, label="$\\omega_y$")
+    plt.plot(t, res[9+2], alpha=0.4, label="$\\omega_z$")
+    # plt.plot(t, res[9])
+    # phi = np.arccos(res[2]) * 180 / np.pi
+    # plt.plot(t, phi)
+    plt.xlabel("Time (s)")
+    plt.ylabel("Tilt angle (deg)")
+    plt.legend()
+    plt.tight_layout()
+    plt.show()

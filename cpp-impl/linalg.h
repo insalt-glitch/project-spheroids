@@ -2,21 +2,12 @@
 #include <stdint.h>
 #include <immintrin.h>
 
-#define s8 int8_t
-#define s16 int16_t
-#define s32 int32_t
-#define s64 int64_t
-#define u8 uint8_t
-#define u16 uint16_t
-#define u32 uint32_t
-#define u64 uint64_t
-#define f32 float
-#define f64 double
+#include "types.h"
 
 union Vec3 {
     struct {
-        double x, y, z;
-        double _pad = 0.0;
+        f64 x, y, z;
+        f64 _pad = 0.0;
     };
     __m256d data;
 };
@@ -30,7 +21,7 @@ union AVX128d {
     f64 el[2];
 };
 
-static inline Mat3 operator*(const double scalar, const Mat3& A) {
+static inline Mat3 operator*(const f64 scalar, const Mat3& A) {
     __m256d s = _mm256_set1_pd(scalar);
     return Mat3{
         Vec3{ .data = _mm256_mul_pd(s, A.data[0].data) },
@@ -67,7 +58,7 @@ static inline Vec3 operator*(const Vec3& a, const Vec3& b) {
     return Vec3{ .data = _mm256_mul_pd(a.data, b.data) };
 }
 
-static inline Vec3 operator*(const double scalar, const Vec3& v) {
+static inline Vec3 operator*(const f64 scalar, const Vec3& v) {
     return Vec3{ .data = _mm256_mul_pd(_mm256_set1_pd(scalar), v.data) };
 }
 

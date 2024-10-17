@@ -4,7 +4,9 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <gsl/gsl_errno.h>
 
+#include "types.h"
 #include "linalg.h"
 
 struct SystemConstants{
@@ -128,7 +130,14 @@ static f64 correctionFactorTorque(const f64 Re_p, const SystemConstants* sc) {
     return C_T;
 }
 
-extern "C" void systemDynamics(f64 *const state_derivative, const f64 *const state, const SystemConstants *const sc) {
+static int systemDynamics(
+    f64 t,
+    const f64 *const state,
+    f64 *const derivative,
+    void* args
+) {
+    (void)(t);
+    const SystemConstants *const sc = (SystemConstants*)args;
     const Vec3 g = { .x = sc->g_x, .y = sc->g_y, .z = sc->g_z };
     // extract state variables
     // const Vec3 x     = { .x = state[0], .y = state[1], .z =state[2] };
@@ -172,16 +181,17 @@ extern "C" void systemDynamics(f64 *const state_derivative, const f64 *const sta
     const Vec3 dndt = cross(omega, n);
     const Vec3 domegadt = matmul(J_pinverse, (T_h - matmul(dJ_pdt, omega)));
     // copy into result vector
-    state_derivative[0+0] = dxdt.x;
-    state_derivative[0+1] = dxdt.y;
-    state_derivative[0+2] = dxdt.z;
-    state_derivative[3+0] = dvdt.x;
-    state_derivative[3+1] = dvdt.y;
-    state_derivative[3+2] = dvdt.z;
-    state_derivative[6+0] = dndt.x;
-    state_derivative[6+1] = dndt.y;
-    state_derivative[6+2] = dndt.z;
-    state_derivative[9+0] = domegadt.x;
-    state_derivative[9+1] = domegadt.y;
-    state_derivative[9+2] = domegadt.z;
+    derivative[0+0] = dxdt.x;
+    derivative[0+1] = dxdt.y;
+    derivative[0+2] = dxdt.z;
+    derivative[3+0] = dvdt.x;
+    derivative[3+1] = dvdt.y;
+    derivative[3+2] = dvdt.z;
+    derivative[6+0] = dndt.x;
+    derivative[6+1] = dndt.y;
+    derivative[6+2] = dndt.z;
+    derivative[9+0] = domegadt.x;
+    derivative[9+1] = domegadt.y;
+    derivative[9+2] = domegadt.z;
+    return GSL_SUCCESS;
 }
