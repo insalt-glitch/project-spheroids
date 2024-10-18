@@ -1,10 +1,12 @@
+#ifndef DYNAMICS_H
+#define DYNAMICS_H
+
 #include <assert.h>
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <gsl/gsl_errno.h>
 
 #include "types.h"
 #include "linalg.h"
@@ -130,8 +132,8 @@ static f64 correctionFactorTorque(const f64 Re_p, const SystemConstants* sc) {
     return C_T;
 }
 
-static int systemDynamics(
-    f64 t,
+static int spheriodDynamics(
+    const f64 t,
     const f64 *const state,
     f64 *const derivative,
     void* args
@@ -140,7 +142,6 @@ static int systemDynamics(
     const SystemConstants *const sc = (SystemConstants*)args;
     const Vec3 g = { .x = sc->g_x, .y = sc->g_y, .z = sc->g_z };
     // extract state variables
-    // const Vec3 x     = { .x = state[0], .y = state[1], .z =state[2] };
     const Vec3 v     = { .x = state[3], .y = state[4], .z =state[5] };
     Vec3 n     = { .x = state[6], .y = state[7], .z =state[8] };
     const Vec3 omega = { .x = state[9], .y = state[10], .z =state[11] };
@@ -195,3 +196,5 @@ static int systemDynamics(
     derivative[9+2] = domegadt.z;
     return GSL_SUCCESS;
 }
+
+#endif

@@ -1,3 +1,5 @@
+#ifndef SOLVE_H
+#define SOLVE_H
 #include <stdio.h>
 #include <gsl/gsl_errno.h>
 #include <gsl/gsl_odeiv2.h>
@@ -5,9 +7,25 @@
 #include <vector>
 
 #include "types.h"
-#include "dynamics.cpp"
+#include "events.h"
+#include "dynamics.h"
 
 constexpr size_t DIMENSION = 12;
+typedef int (*IntegrateFunction)(double t, const double *y, double *dydt, void *params);
+
+struct ParameterPack {
+    SystemConstants* constants;
+    IntegrateEvent* event_ptr;
+};
+
+template<IntegrateFunction integrateFunc>
+static int integrateWithEvent(double t, const double *state, double *derivative, void* arg) {
+    ParameterPack* param_pack = (ParameterPack*) arg;
+    int status = integrateFunc(t, state, derivative, param_pack->constants);
+    if (status != GSL_SUCCESS)
+        return status;
+    return param_pack->event_ptr->event(t, state, derivative, param_pack->constants);
+}
 
 extern "C" void solveDynamics(
     f64 **const y_eval,
@@ -17,7 +35,8 @@ extern "C" void solveDynamics(
     f64 *const y0,
     SystemConstants *const constants,
     const f64 rel_tol,
-    const f64 abs_tol
+    const f64 abs_tol,
+    EventType event_type
 ) {
     assert(y_eval != NULL);
     assert(y_eval[0] != NULL);
@@ -29,11 +48,15 @@ extern "C" void solveDynamics(
     assert(rel_tol > 0);
     assert(abs_tol > 0);
 
+    ParameterPack params = {
+        .constants = constants,
+        .event_ptr = selectEventType(event_type)
+    };
     gsl_odeiv2_system sys = {
-        .function = systemDynamics,
+        .function = integrateWithEvent<&spheriodDynamics>,
         .jacobian = NULL,
         .dimension = DIMENSION,
-        .params = constants
+        .params = &params
     };
     gsl_odeiv2_driver *d =
         gsl_odeiv2_driver_alloc_y_new(&sys, gsl_odeiv2_step_rkf45,
@@ -53,4 +76,7 @@ extern "C" void solveDynamics(
     }
     *num_eval = i;
     gsl_odeiv2_driver_free(d);
+    delete params.event_ptr;
 }
+
+#endif

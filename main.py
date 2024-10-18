@@ -8,6 +8,7 @@ from pathlib import Path
 from tqdm import tqdm
 
 FOLDER_FIGURES = Path("figures")
+STYLE_FILE = "plot_style.mplstyle"
 
 class IntergateEvent:
     buf_size = 100
@@ -258,7 +259,7 @@ def discriminantDelta(const: dynamics.SystemConstants):
 
 if __name__ == '__main__':
     # plotSettlingSpeedVsAspectRatio()
-    fac = 4
+    fac = 1 # 4
     const = dynamics.SystemConstants()
     const = dynamics.SystemConstants(a_para=const.a_para * fac, a_perp=const.a_perp * fac)
 
@@ -268,23 +269,25 @@ if __name__ == '__main__':
     omega0 = [0.13, 0.2, 0.78]
     y0 = np.concat([x0, v0, n0, omega0])
 
-    t = np.linspace(0.0, 100.0, num=10_000)
-    res = c_dynamics.solveDynamics(
+    t = np.linspace(0.0, 50.0, num=10_000)
+    t, res = c_dynamics.solveDynamics(
         y0, t,
         const,
         rel_tol=1e-12,
-        abs_tol=1e-12
+        abs_tol=1e-12,
+        event_type=1,
     )
     res = res.T
     n = res[6:9]
-    plt.plot(t, res[9+0], alpha=0.4, label="$\\omega_x$")
-    plt.plot(t, res[9+1], alpha=0.4, label="$\\omega_y$")
-    plt.plot(t, res[9+2], alpha=0.4, label="$\\omega_z$")
-    # plt.plot(t, res[9])
-    # phi = np.arccos(res[2]) * 180 / np.pi
-    # plt.plot(t, phi)
+    phi = np.arccos(n[2])
+    theta = np.sign(n[1]) * np.arccos(n[0] / np.linalg.norm(n[:2], axis=0))
+    plt.style.use(STYLE_FILE)
+    plt.plot(t, phi * 180 / np.pi, label="$\\varphi(t)$")
+    plt.plot(t, theta * 180 / np.pi, label="$\\theta(t)$")
     plt.xlabel("Time (s)")
-    plt.ylabel("Tilt angle (deg)")
+    plt.ylabel("Angle (deg)")
+    plt.yticks([-30, 0, 30, 60, 90, 120])
+    plt.ylim(-30, 120)
     plt.legend()
     plt.tight_layout()
     plt.show()

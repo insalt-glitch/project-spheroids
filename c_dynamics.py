@@ -1,6 +1,7 @@
 from pathlib import Path
 import ctypes
-from ctypes import c_double, c_size_t, pointer, byref, POINTER, cast
+from ctypes import c_double, c_size_t, c_int
+from ctypes import pointer, byref, POINTER, cast
 import numpy as np
 from numpy.typing import NDArray
 from typing import Tuple
@@ -35,7 +36,8 @@ class CppConfig:
             C_DOUBLE_PTR,
             POINTER(CppConstantsStruct),
             c_double,
-            c_double
+            c_double,
+            c_int
         ]
 
     def initConstants(const: dynamics.SystemConstants) -> CppConstantsStruct:
@@ -49,32 +51,34 @@ class CppConfig:
         struct.g_pad = c_double(0.0)
         return struct
 
+def _numpyArray2DToCtypesPtr(arr):
+    ct_arr = np.ctypeslib.as_ctypes(arr)
+    ptr_arr = C_DOUBLE_PTR * arr.shape[0]
+    ptr_ptr_arr = cast(
+        ptr_arr(*(cast(row, C_DOUBLE_PTR) for row in ct_arr)),
+        POINTER(C_DOUBLE_PTR))
+    return ptr_ptr_arr
+
 def solveDynamics(
         y0: NDArray[np.float64],
         t_eval: NDArray[np.float64],
         const: dynamics.SystemConstants,
-        rel_tol=1e-6, abs_tol=1e-6
+        rel_tol=1e-6, abs_tol=1e-6, event_type=0
     ):
     config = CppConfig(const)
     result = np.empty(shape=(t_eval.size, 12), dtype=np.float64)
 
-    ct_arr = np.ctypeslib.as_ctypes(result)
-    ptr_arr = C_DOUBLE_PTR * t_eval.size
-    y_eval = cast(
-        ptr_arr(*(cast(row, C_DOUBLE_PTR) for row in ct_arr)),
-        POINTER(C_DOUBLE_PTR))
+    y_eval = _numpyArray2DToCtypesPtr(result)
     num_evaluations = c_size_t(0)
-    len_t_eval = c_size_t(t_eval.size)
-    rel_tol = c_double(rel_tol)
-    abs_tol = c_double(abs_tol)
     config.func_solve(
         y_eval,
         byref(num_evaluations),
         t_eval.ctypes.data_as(C_DOUBLE_PTR),
-        len_t_eval,
+        c_size_t(t_eval.size),
         y0.ctypes.data_as(C_DOUBLE_PTR),
         byref(config.cpp_constants_struct),
-        rel_tol,
-        abs_tol
+        c_double(rel_tol),
+        c_double(abs_tol),
+        c_int(event_type)
     )
-    return result[:num_evaluations.value]
+    return t_eval[:num_evaluations.value], result[:num_evaluations.value]

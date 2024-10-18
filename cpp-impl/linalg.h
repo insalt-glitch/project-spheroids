@@ -1,9 +1,14 @@
+#ifndef LINALG_H
+#define LINALG_H
+
 #include <math.h>
 #include <stdint.h>
 #include <immintrin.h>
 
 #include "types.h"
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
 union Vec3 {
     struct {
         f64 x, y, z;
@@ -11,6 +16,7 @@ union Vec3 {
     };
     __m256d data;
 };
+#pragma GCC diagnostic pop
 
 union Mat3 {
     Vec3 data[3];
@@ -126,8 +132,9 @@ static Mat3 matmul(const Mat3& A, const Mat3& B) {
     };
 }
 
-template<typename F, typename FPrime, typename... Types>
-f64 newtonMethod(const f64 x0, F f, FPrime f_prime, Types... args) {
+
+template<typename F, typename FPrime, typename... ArgTypes>
+f64 newtonMethod(const f64 x0, F f, FPrime f_prime, ArgTypes... args) {
     f64 x, x_next = x0;
     do {
         x = x_next;
@@ -135,3 +142,5 @@ f64 newtonMethod(const f64 x0, F f, FPrime f_prime, Types... args) {
     } while (fabs(x - x_next) > 1e-6);
     return x_next;
 }
+
+#endif

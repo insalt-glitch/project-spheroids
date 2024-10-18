@@ -1,17 +1,18 @@
-CFLAGS=-std=gnu++20 -Wall -Wextra -Wpedantic -Wno-unused-function -shared -fPIC -march=native
+WARNING_FLAGS=-Wall -Wextra -Wpedantic -Wno-unused-function
+CFLAGS=-std=gnu++20 -shared -fPIC -march=native $(WARNING_FLAGS)
 CLIBS=-lgsl -lgslcblas -lm
-CC=g++
+CXX=g++
+SRC_DEPS=dynamics.h linalg.h solve.cpp events.h types.h
 
 .PHONY : clean release debug solve
 
-
-solve : $(DYNAMICS_SRC)
-	$(CC) -o solve.so solve.cpp -Ofast  -s $(CFLAGS) $(CLIBS)
+solve : $(SRC_DEPS)
+	$(CXX) -o solve.so solve.cpp -Ofast -s $(CFLAGS) $(CLIBS)
 
 release : dynamics
 
-debug : $(DYNAMICS_SRC)
-	$(CC) -o dynamics_debug.so dynamics.cpp -O0 -g $(CFLAGS) $(CLIBS)
+debug : $(SRC_DEPS)
+	$(CXX) -o solve_debug.so solve.cpp -O0 -g $(CFLAGS) $(CLIBS)
 
 clean :
-	rm -f dynamics.so dynamics_debug.so
+	rm -f solve.so solve_debug.so
