@@ -10,22 +10,6 @@ from tqdm import tqdm
 FOLDER_FIGURES = Path("figures")
 STYLE_FILE = "plot_style.mplstyle"
 
-class IntergateEvent:
-    buf_size = 100
-    buf = np.ones(buf_size)
-    buf_idx = 0
-
-    def reset():
-        IntergateEvent.buf_idx = 0
-        IntergateEvent.buf = np.ones(IntergateEvent.buf_size)
-
-def detect_steady_state(t, y, args) -> float:
-    IntergateEvent.buf[IntergateEvent.buf_idx] = np.linalg.norm(y[9:12])
-    IntergateEvent.buf_idx = (IntergateEvent.buf_idx + 1) % IntergateEvent.buf_size
-    return np.any(IntergateEvent.buf > 1e-5)
-
-detect_steady_state.terminal = True
-
 def plotCoefficientsVsReynoldsNumber(save=False):
     """Plot the coefficients C_F and C_T against the Reynolds number for testing
     """
@@ -258,31 +242,47 @@ def discriminantDelta(const: dynamics.SystemConstants):
     delta = 1 - 4 * vg_nondim ** 2 * C_T * curly_R ** 3 * curly_V ** 2
 
 if __name__ == '__main__':
+    # detect sign change omega > 0 -> omega < 0 and record theta. Then detect theta = constant with rolling buffer
+    # do binary search to find bifurcation point for a given set of parameters.
+    # search in curlyR curlyV and lambda space.
+    # lambda -> aspect ratio
+    # curlyR -> density ratio
+    # curlyV -> particle volume
     # plotSettlingSpeedVsAspectRatio()
-    fac = 1 # 4
-    const = dynamics.SystemConstants()
-    const = dynamics.SystemConstants(a_para=const.a_para * fac, a_perp=const.a_perp * fac)
+    # 4 -> osciallation
+    fac = 2 # 3.9375
+    a_perp, a_para = dynamics.spheriodDimensionsFromBeta(0.2,  9.2e-11)
+    const = dynamics.SystemConstants(a_para=a_para, a_perp=a_perp)
+    # const = dynamics.SystemConstants(a_para=const.a_para * fac, a_perp=const.a_perp * fac)
 
-    x0 = [0.1, 0.2, 0.3]
-    v0 = [5e-2, 7e-2, 3e-2]
-    n0 = np.array([1, 2, 3]) / np.linalg.norm([1,2,3])
-    omega0 = [0.13, 0.2, 0.78]
+    RNG = np.random.default_rng(0)
+    # for i in range(10):
+    x0 = np.zeros((3,))
+    v0 = RNG.normal(size=(3,)) # 1%
+    n0 = RNG.normal(size=(3,)) # 0.1%
+    n0 /= np.linalg.norm(n0, keepdims=True)
+    omega0 = RNG.normal(size=(3,)) # 0.01 / tau_p
     y0 = np.concat([x0, v0, n0, omega0])
 
-    t = np.linspace(0.0, 50.0, num=10_000)
+    t = np.linspace(0, 200, num=10_000)
     t, res = c_dynamics.solveDynamics(
-        y0, t,
-        const,
+        y0=y0,
+        const=const,
+        t_eval=t,
+        # t_span=(0.0, 1000.0),
         rel_tol=1e-12,
         abs_tol=1e-12,
-        event_type=1,
+        event_type=2,
     )
+
     res = res.T
     n = res[6:9]
-    phi = np.arccos(n[2])
-    theta = np.sign(n[1]) * np.arccos(n[0] / np.linalg.norm(n[:2], axis=0))
+    theta = np.arccos(n[2])
+    # print(t, theta * 180 / np.pi)
+    # print(f"t: {t} | theta: {theta * 180 / np.pi}")
+    phi = np.sign(n[1]) * np.arccos(n[0] / np.linalg.norm(n[:2], axis=0))
     plt.style.use(STYLE_FILE)
-    plt.plot(t, phi * 180 / np.pi, label="$\\varphi(t)$")
+    # plt.plot(t[t>40], phi[t>40] * 180 / np.pi, label="$\\varphi(t)$")
     plt.plot(t, theta * 180 / np.pi, label="$\\theta(t)$")
     plt.xlabel("Time (s)")
     plt.ylabel("Angle (deg)")

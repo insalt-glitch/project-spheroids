@@ -30,6 +30,7 @@ static int integrateWithEvent(double t, const double *state, double *derivative,
 extern "C" void solveDynamics(
     f64 **const y_eval,
     size_t *num_eval,
+    f64 *const t_span,
     const f64 *const t_eval,
     const size_t len_t_eval,
     f64 *const y0,
@@ -38,43 +39,62 @@ extern "C" void solveDynamics(
     const f64 abs_tol,
     EventType event_type
 ) {
-    assert(y_eval != NULL);
-    assert(y_eval[0] != NULL);
-    assert(num_eval != NULL);
-    assert(len_t_eval > 0);
-    assert(t_eval != NULL);
-    assert(y0 != NULL);
-    assert(constants != NULL);
+    assert(y_eval != nullptr);
+    assert(y_eval[0] != nullptr);
+    assert(num_eval != nullptr);
+    assert(y0 != nullptr);
+    assert(constants != nullptr);
+    assert((t_eval != nullptr && len_t_eval >0) || t_span != nullptr);
     assert(rel_tol > 0);
     assert(abs_tol > 0);
 
+    // TODO: This could also be a temporary solution, but we want to send the average (or the last) value of the oscillation event buffer back to python to save it.
+    IntegrateEvent* event_ptr = selectEventType(event_type);
     ParameterPack params = {
         .constants = constants,
-        .event_ptr = selectEventType(event_type)
+        .event_ptr = event_ptr
     };
     gsl_odeiv2_system sys = {
         .function = integrateWithEvent<&spheriodDynamics>,
-        .jacobian = NULL,
+        .jacobian = nullptr,
         .dimension = DIMENSION,
         .params = &params
     };
     gsl_odeiv2_driver *d =
         gsl_odeiv2_driver_alloc_y_new(&sys, gsl_odeiv2_step_rkf45,
                                       1e-6, rel_tol, abs_tol);
-    assert(d != NULL);
+    assert(d != nullptr);
 
-    f64 t = t_eval[0];
     f64 y[DIMENSION];
     memcpy(y, y0, sizeof(f64) * DIMENSION);
 
     int status;
-    size_t i = 0;
-    for (; i < len_t_eval; ++i) {
-        status = gsl_odeiv2_driver_apply(d, &t, t_eval[i], y);
-        memcpy(y_eval[i], y, sizeof(f64) * DIMENSION);
-        if (status != GSL_SUCCESS) break;
+    // t_span gets ignored if t_eval is set.
+    if (t_eval != nullptr) {
+        f64 t = t_eval[0];
+        size_t i = 0;
+        for (; i < len_t_eval; ++i) {
+            status = gsl_odeiv2_driver_apply(d, &t, t_eval[i], y);
+            memcpy(y_eval[i], y, sizeof(f64) * DIMENSION);
+            if (status != GSL_SUCCESS) break;
+        }
+        *num_eval = i;
+    } else {
+        f64 t_start = t_span[0];
+        f64 t_end = t_span[1];
+        gsl_odeiv2_driver_apply(d, &t_start, t_end, y);
+        // TODO: Temporary hack to return the state at the last event
+        if (event_type == EventType::OSCILLATION) {
+            OscillationEvent* osc_event = (OscillationEvent*)event_ptr;
+            memcpy(y_eval[0], osc_event->y_last.data(), sizeof(f64) * DIMENSION);
+            t_span[1] = osc_event->t_last;
+        } else {
+            memcpy(y_eval[0], y, sizeof(f64) * DIMENSION);
+            t_span[1] = t_start;
+        }
+        *num_eval = 1;
     }
-    *num_eval = i;
+
     gsl_odeiv2_driver_free(d);
     delete params.event_ptr;
 }

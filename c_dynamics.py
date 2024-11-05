@@ -32,6 +32,7 @@ class CppConfig:
             POINTER(C_DOUBLE_PTR),
             POINTER(c_size_t),
             C_DOUBLE_PTR,
+            C_DOUBLE_PTR,
             c_size_t,
             C_DOUBLE_PTR,
             POINTER(CppConstantsStruct),
@@ -61,24 +62,38 @@ def _numpyArray2DToCtypesPtr(arr):
 
 def solveDynamics(
         y0: NDArray[np.float64],
-        t_eval: NDArray[np.float64],
         const: dynamics.SystemConstants,
-        rel_tol=1e-6, abs_tol=1e-6, event_type=0
+        t_eval: NDArray[np.float64] = None,
+        t_span: Tuple[float, float] = None,
+        rel_tol: float=1e-6, abs_tol: float=1e-6, event_type: int=0
     ):
+    if t_eval is None and t_span is None:
+        raise ValueError("Must specify t_eval or t_span")
     config = CppConfig(const)
-    result = np.empty(shape=(t_eval.size, 12), dtype=np.float64)
+    result_size = 1 if t_eval is None else t_eval.size
+    result = np.empty(shape=(result_size, 12), dtype=np.float64)
 
+    if t_eval is not None:
+        t_eval_ptr = t_eval.ctypes.data_as(C_DOUBLE_PTR)
+        t_span_ptr = None
+    else:
+        t_span_arr = np.array(t_span, dtype=np.float64)
+        t_span_ptr = t_span_arr.ctypes.data_as(C_DOUBLE_PTR)
+        t_eval_ptr = None
     y_eval = _numpyArray2DToCtypesPtr(result)
     num_evaluations = c_size_t(0)
     config.func_solve(
         y_eval,
         byref(num_evaluations),
-        t_eval.ctypes.data_as(C_DOUBLE_PTR),
-        c_size_t(t_eval.size),
+        t_span_ptr,
+        t_eval_ptr,
+        c_size_t(result_size),
         y0.ctypes.data_as(C_DOUBLE_PTR),
         byref(config.cpp_constants_struct),
         c_double(rel_tol),
         c_double(abs_tol),
         c_int(event_type)
     )
+    if t_eval is None:
+        return t_span_arr[1], result[0]
     return t_eval[:num_evaluations.value], result[:num_evaluations.value]

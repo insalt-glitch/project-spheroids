@@ -93,7 +93,6 @@ static f64 correctionFactorStokesForce(const f64 Re_p0, const SystemConstants* s
         // => f_{d,90}(Re,beta)=1+0.15*ReJFM^0.687+c_{d,5}*log(beta)^c_{d,6}*ReJFM^(c_{d,7}+c_{d,8}*log(beta))
         //                     =1+C_F*3*A_perp*Rep/(8*beta)
         // => C_F=8*beta*(0.15*ReJFM^0.687+c_{d,5}*log(beta)^c_{d,6}*ReJFM^(c_{d,7}+c{d,8}*log(beta)))/(3*A_perp*Rep)
-        // TODO: I cannot follow the calculation here.
         C_F = newtonMethod(
             1.0,
             selfConsistencyEqProlateC_F,
