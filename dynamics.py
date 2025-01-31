@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.interpolate import RectBivariateSpline
 from typing import Tuple
+from scipy import optimize
 
 class SystemConstants:
     def __init__(
@@ -588,6 +589,179 @@ def correctionFactorTorque(
             # performs 2D linear interpolation
             bivariate_obj = RectBivariateSpline(arr_Re_p, arr_beta, C_TS, kx=1, ky=1)
             C_T = np.squeeze(bivariate_obj(Re_p, const.beta))
+    return C_T
+
+def explicitCorrectionFactorStokesForce(
+    Re_p0: float,
+    beta: float,
+    full_solve: bool = False,
+) -> float:
+    """Calculate correction factor for the Stokes force
+
+    Different papers use 'lambda' or 'beta' for the aspect ratio. Here we use 'beta'.
+
+    Args:
+        Re_p0 (float): zeroth-order Reynolds number
+        beta (float): ratio of the radii of a spheroid (aspect ratio)
+        full_solve (bool, optional): Whether to solve the self-consistency
+            equation. Defaults to False.
+
+    Returns:
+        float: correction factor for the Stokes force
+    """
+    # Re_0 upper bound of the actual reynolds number
+    # The correction factor C_F for the stokes force for Reynolds numbers > 1
+    # full_solve: Whether to solve the self-consistency equation for C_F otherwise an
+    #   interpolation formula is used.
+    if Re_p0 <= 1:
+        C_F = 1
+        return C_F
+    if beta >= 1:  # beta > 1 -> prolate spheroid
+        # The following formulas are discussed in Fröhlich JFM 901 (2020):
+        #   https://doi.org/10.1017/jfm.2020.482
+        # Empirical correlation coefficients (Page 32 - Table 5 c_{d,i})
+        c_d = [-0.007, 1.0, 1.17, -0.07, 0.047, 1.14, 0.7, -0.008]
+        # Consider rod-like particles aligned with the steady state direction
+        # (phi=pi/2), i.e. consider the drag coefficient (Page 19 - Section 3.3.1 - Eq. 3.4b)
+        #   C_{D,90}(Re,beta)=C_{D,Stokes,90}(Re,beta)*f_{d,90}(Re,beta)
+        #   C_{D,Stokes,90}(Re,beta) is the analytical drag coefficient (Page 30 - Eq. B5)
+        # Take the correction function (Page 30 - Eq. B6b) f_{d,90}(Re,beta) then
+        # in our model, we have vgDot=g-A_perp v_g/taup[1+C_F*3/8*ap/beta*A_perp*vg/nu]
+        # => f_{d,90}(Re,beta)=1+0.15*ReJFM^0.687+c_{d,5}*log(beta)^c_{d,6}*ReJFM^(c_{d,7}+c_{d,8}*log(beta))
+        #                     =1+C_F*3*A_perp*Rep/(8*beta)
+        # => C_F=8*beta*(0.15*ReJFM^0.687+c_{d,5}*log(beta)^c_{d,6}*ReJFM^(c_{d,7}+c{d,8}*log(beta)))/(3*A_perp*Rep)
+        # TODO: I cannot follow the calculation here.
+        A_perp, _ = translationalResistanceCoefficients(beta)
+        if full_solve:
+            def selfConsistencyEqProlateC_F(C_F):
+                return + 1 - np.sqrt(1 + 3 * A_perp * C_F * Re_p0 / (2 * beta)) \
+                    + 2 * (+ 0.18277810531719724 * beta ** 0.229 * ((- 2 + np.sqrt(4 + 6 * A_perp \
+                        * C_F * Re_p0 / beta)) / (A_perp * C_F)) ** 0.687 + 0.75 ** (-c_d[6] - c_d[7] \
+                        * np.log(beta)) * c_d[4] * (beta ** (1 / 3) * (- 2 + np.sqrt(4 + 6 * A_perp \
+                        * C_F * Re_p0 / beta)) / (A_perp * C_F)) ** (c_d[6] + c_d[7] * np.log(beta)) \
+                        * np.log(beta) ** c_d[5] \
+                    )
+
+            C_F = optimize.least_squares(fun=selfConsistencyEqProlateC_F, x0=1, bounds=(0.0, np.inf)).x[0]
+        else:
+            # TODO: Cannot verify formula for RE_JFM
+            Re_correction = beta  ** (2 / 3) / 2
+            Re_JFM = Re_p0 / Re_correction
+            # This approximation of C_F is obtained by rearranging the formula given
+            # above (cmp. f_{d,90}(Re,beta)=...)
+            C_F = 8 * beta * (
+                + 0.15 * Re_JFM ** 0.687
+                + c_d[4] * np.log(beta) ** c_d[5] * Re_JFM ** (c_d[6] + c_d[7] * np.log(beta))
+            ) / (3 * A_perp * Re_p0)
+    else:  # beta < 1 -> oblate spheroid
+        # Use Ouchene (2020) for interpolated coefficient : https://doi.org/10.1063/5.0011618
+        # Consider disk-like particles aligned with the steady state direction
+        # (phi=0), i.e. consider the drag coefficient
+        _, A_para = translationalResistanceCoefficients(beta)
+        if full_solve:
+            # TODO: Where does this formula come from?
+            def selfConsistencyEqOblateC_F(C_F):
+                return (
+                    A_para * (2 - np.sqrt(2) * np.sqrt(2 + 3 * A_para * C_F * Re_p0)) \
+                    + 0.7311124212687891 * beta ** 96.47233333333332  * ((-2 + np.sqrt(4 + 6 * A_para \
+                    * C_F * Re_p0)) / (A_para * C_F)) ** 0.687 + 1.453237823359436 \
+                    * (1 - beta) ** 0.4374 * beta ** 0.5837333333333332 * ((-2 + np.sqrt(4 + 6 * A_para \
+                    * C_F * Re_p0)) / (A_para * C_F)) ** 0.7512
+                )
+
+            C_F=optimize.least_squares(fun=selfConsistencyEqOblateC_F, x0=1, bounds=(0.0, np.inf)).x[0]
+        else:
+            # TODO: Cannot verify formula for RE_JFM
+            Re_correction = max(1, beta) / (2 * beta ** (1 / 3))
+            Re_JFM = Re_p0 / Re_correction
+            # K_phi0 is defined in Ouchene (2020) (Page 4 - Eq. 13)
+            # TODO: The formula in the paper does not agree with the formula here
+            # (copied from the MATLAB-script)
+            K_phi0 = A_para / beta ** (1 / 3)
+            # This approximation of C_F is obtained by rearranging the formula given
+            # above (cmp. f_{d,90}(Re,beta)=...) (Fröhlich (2020)) but using the C_{D,0}(Re,beta)
+            # from Ouchene (2020) (Page 6 - Eq. 18)
+            C_F= 8 * (
+                + 0.15 * beta ** 95.91 * Re_JFM ** 0.687
+                + 0.2927 * (1 - beta) ** 0.4374 * Re_JFM ** 0.7512
+            ) / K_phi0 / (3 * A_para * Re_p0)
+    return C_F
+
+def explicitCorrectionFactorTorque(
+    Re_p: float,
+    beta: float,
+    shape_factor: float,
+    do_ouchene_disks=True,
+) -> float:
+    """Calculate the correction factor for the torque
+
+    Different papers use 'lambda' or 'beta' for the aspect ratio. Here we use 'beta'.
+
+    Args:
+        Re_p (float): particle Reynolds number. Can be obtained from
+            'correctionFactorStokesForce(full_solve=True)'
+        beta (float): ratio of the radii of a spheroid (aspect ratio)
+        shape_factor (float): shape factor for the interial torque of a spheriod
+        do_ouchene_disks (bool, optional): Whether to use the analytical formula
+            for disks from Ouchene (2020). Defaults to True.
+
+    Returns:
+        float: correction factor
+    """
+    if Re_p <= 1:
+        C_T = 1
+        return C_T
+
+    if beta > 1:  # beta > 1 -> prolate spheroid
+        # The following formulas are discussed in Fröhlich JFM 901 (2020):
+        #   https://doi.org/10.1017/jfm.2020.482
+        # Empirical correlation coefficients (Page 32 - Table 5 c_{t,i})
+        c_t = [0.931, 0.675, 0.162, 0.657, 2.77, 0.178, 0.177]
+
+        # TODO: Cannot verify this formula
+        Re_correction = beta ** (2 / 3) / 2
+        Re_JFM = Re_p / Re_correction
+        # TODO: Where does this formula come from?
+        # TODO: In Fröhlich (2020) (Page 24 - Eq. 3.16a) where is an additional
+        #       cos(phi) term which would be zero?!
+        C_JFM = (
+            +c_t[0] * np.log(beta) ** c_t[1] / (Re_JFM ** c_t[2])
+            +c_t[3] * np.log(beta) ** c_t[4] / (Re_JFM ** (c_t[5] + c_t[6] * np.log(beta)))
+        )
+        # TODO: Where where do these formulas (& corrections) come from?
+        C_correction = np.pi / (2 * beta ** 2)
+        C_Re = C_JFM * C_correction
+        # Original coefficient
+        C_0 = np.abs(shape_factor) / 2
+        C_T = C_Re / C_0
+    else:  # beta < 1 -> oblate spheroid
+        if do_ouchene_disks:
+            # Use Ouchene (2020) for interpolated coefficient : https://doi.org/10.1063/5.0011618
+            Re_correction = max(1, beta) / (2 * beta ** (1 / 3))
+            Re_PF = Re_p / Re_correction
+            # Ouchene (2020) for phi = pi / 4 (Page 9 - Eq. 24):
+            C_PF = 1.85 * ((1 - beta) / beta) ** 0.832 / (2 * Re_PF ** 0.146)
+            # Coefficient corrected for finite Re
+            C_correction = np.pi * beta / (2 * max(1, beta) ** 3)
+            C_Re = C_correction * C_PF
+            # Original coefficient
+            C_0 = np.abs(shape_factor) / 2
+            C_T = C_Re / C_0
+        else:
+            # Interpolation with data from Jiang (2021) https://doi.org/10.1103/PhysRevFluids.6.024302
+            # TODO: What is 'C_TS'
+            # TODO: The data does not seem to be available in the paper
+            arr_Re_p = [0, 0.3, 3, 30]
+            arr_beta = [1/6, 1/3, 1/2, 1]
+            C_TS = np.array([
+                [1.000000000000000, 1.000000000000000, 1.000000000000000, 1.0],
+                [0.884697478495574, 0.879578485160704, 0.851105581379940, 1.0],
+                [0.686980996559064, 0.692434126615873, 0.666082628906040, 1.0],
+                [0.491498599164208, 0.505289768071043, 0.488460594531096, 1.0],
+            ])
+            # performs 2D linear interpolation
+            bivariate_obj = RectBivariateSpline(arr_Re_p, arr_beta, C_TS, kx=1, ky=1)
+            C_T = np.squeeze(bivariate_obj(Re_p, beta))
     return C_T
 
 def particleInteriaTensorCoefficents(
