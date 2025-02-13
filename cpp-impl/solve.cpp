@@ -48,6 +48,16 @@ extern "C" void solveDynamics(
     assert(rel_tol > 0);
     assert(abs_tol > 0);
 
+    // fprintf(stdout, "beta: %.4e\n", constants->beta);
+    // fprintf(stdout, "curly_A_F: %.4e\n", constants->curly_A_F);
+    // fprintf(stdout, "curly_A_T: %.4e\n", constants->curly_A_T);
+    // fprintf(stdout, "A_para: %.4e\n", constants->A_para);
+    // fprintf(stdout, "A_perp: %.4e\n", constants->A_perp);
+    // fprintf(stdout, "C_para: %.4e\n", constants->C_para);
+    // fprintf(stdout, "C_perp: %.4e\n", constants->C_perp);
+    // fprintf(stdout, "J_para: %.4e\n", constants->J_para);
+    // fprintf(stdout, "J_perp: %.4e\n", constants->J_perp);
+
     // TODO: This could also be a temporary solution, but we want to send the average (or the last) value of the oscillation event buffer back to python to save it.
     IntegrateEvent* event_ptr = selectEventType(event_type);
     ParameterPack params = {

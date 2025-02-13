@@ -148,7 +148,7 @@ def plotCorrectionCoefficients(save=False):
                 C_F = dynamics.correctionFactorStokesForce(Re_p0, const.beta, full_solve=False)
                 v_g_star = dynamics.steadyStateSettlingSpeed(C_F, const.a_perp, const.tau_p, const.A_g, const.nu, const.g)
                 Re_p = dynamics.particleReynoldsNumber(const.a_perp, const.a_para, v_g_star, const.nu)
-                C_T = dynamics.correctionFactorTorque(Re_p, const.beta, const.F_lambda)
+                C_T = dynamics.correctionFactorTorque(Re_p, const.beta, const.F_beta)
                 C_F_arrs[j].append(C_F)
                 C_T_arrs[j].append(C_T)
 
@@ -241,53 +241,130 @@ def discriminantDelta(const: dynamics.SystemConstants):
     curly_V = np.linalg.norm(const.g) * const.particle_volume / const.nu ** 2
     delta = 1 - 4 * vg_nondim ** 2 * C_T * curly_R ** 3 * curly_V ** 2
 
+def matlabComparison():
+    matlab_folder = Path("matlab_data")
+    parameters = np.loadtxt(matlab_folder / "parameters.csv", skiprows=1, delimiter=",")
+    files = sorted(matlab_folder.glob("run_*.csv"))
+    assert len(files) == parameters.shape[0], "Expected same number!"
+    for params, filename in zip(parameters, files):
+        matlab_full_run = np.loadtxt(filename, delimiter=",")
+        t_mat = matlab_full_run[:,0]
+        res_mat = matlab_full_run[:,1:]
+        const = dynamics.SystemConstants(
+            gravitational_acceleration=params[0],
+            fluid_kinematic_viscosity=params[2],
+            a_perp=params[3],
+            a_para=params[4],
+        )
+        x0     = params[5+0:5+3] * np.sqrt(const.tau_p * const.nu) / (np.linalg.norm(const.g) * const.tau_p ** 2)
+        v0     = params[5+3:5+6] * np.sqrt(const.tau_p * const.nu) / (np.linalg.norm(const.g) * const.tau_p ** 2)
+        n0     = params[5+6:5+9]
+        omega0 = params[5+9:5+12]
+        y0 = np.concat([x0, v0, n0, omega0])
+        t_end = params[-1]
+        t = np.linspace(0.0, t_end, num=10_000)
+        t_py, res_py = c_dynamics.solveDynamics(
+            y0=y0,
+            const=const,
+            t_eval=t,
+            t_span=(0.0, 10.0),
+            rel_tol=1e-12,
+            abs_tol=1e-12,
+            event_type=0
+        )
+
+        res_py[:,:3] *= (np.linalg.norm(const.g) * const.tau_p ** 2) / np.sqrt(const.tau_p * const.nu)
+        res_py[:,3:6] *= (np.linalg.norm(const.g) * const.tau_p ** 2) / np.sqrt(const.tau_p * const.nu)
+        res_compatible = np.vstack([np.interp(t_mat, t, res_py[:,i]) for i in range(12)]).T
+        plt.plot(t_py, res_py[:,3+0], label="python x", color="black", ls="solid", lw=2)
+        plt.plot(t_py, res_py[:,3+1], label="python y", color="blue", ls="solid", lw=2)
+        plt.plot(t_py, res_py[:,3+2], label="python z", color="grey", ls="solid", lw=2)
+        plt.plot(t_mat, res_mat[:,3+0], label="matlab x", ls=":", color="orange", lw=1.5)
+        plt.plot(t_mat, res_mat[:,3+1], label="matlab y", ls=":", color="red", lw=1.5)
+        plt.plot(t_mat, res_mat[:,3+2], label="matlab z", ls=":", color="green", lw=1.5)
+        plt.legend()
+        plt.show()
+
+        res_compatible = np.vstack([np.interp(t_mat, t, res_py[:,i]) for i in range(12)]).T
+        idx = np.abs(res_compatible) > 1e-4
+        print(f"Average relative distance: {np.mean(1 - np.abs(res_mat[idx] / res_compatible[idx])):.2E}")
+
+def checkCoefficents():
+    folder = Path("coefficients")
+    for file, beta in zip([folder / "CTCFCoeffs_lamRod0_2.txt", folder / "CTCFCoeffs_lamRod0_5.txt" ], [0.2, 0.5]):
+        data = np.loadtxt(file)
+        print(data.shape)
+        Re = data[:,0]
+        Cf = data[:,1]
+        Ct = data[:,2]
+        const = dynamics.SystemConstants(a_para=beta, a_perp=1)
+        config = c_dynamics.CppConfig(const)
+        import ctypes
+        config.c_dll.correctionFactorStokesForce.argtypes = [
+            ctypes.c_double,
+            ctypes.POINTER(c_dynamics.CppConstantsStruct)
+        ]
+        config.c_dll.correctionFactorStokesForce.restype = ctypes.c_double
+        # print(config.c_dll.correctionFactorStokesForce(, ctypes.byref(config.cpp_constants_struct)))
+        C_F = [config.c_dll.correctionFactorStokesForce(reynold, ctypes.byref(config.cpp_constants_struct)) for reynold in Re]
+        config.c_dll.correctionFactorTorque.argtypes = [
+            ctypes.c_double,
+            ctypes.POINTER(c_dynamics.CppConstantsStruct)
+        ]
+        config.c_dll.correctionFactorTorque.restype = ctypes.c_double
+        C_T = [config.c_dll.correctionFactorTorque(reynold, ctypes.byref(config.cpp_constants_struct)) for reynold in Re]
+        print(np.sum(np.abs(C_F - Cf)))
+        print(np.sum(np.abs(C_T - Ct)))
+
+
 if __name__ == '__main__':
-    # detect sign change omega > 0 -> omega < 0 and record theta. Then detect theta = constant with rolling buffer
-    # do binary search to find bifurcation point for a given set of parameters.
-    # search in curlyR curlyV and lambda space.
-    # lambda -> aspect ratio
-    # curlyR -> density ratio
-    # curlyV -> particle volume
-    # plotSettlingSpeedVsAspectRatio()
-    # 4 -> osciallation
-    fac = 2 # 3.9375
-    a_perp, a_para = dynamics.spheriodDimensionsFromBeta(0.2,  9.2e-11)
-    const = dynamics.SystemConstants(a_para=a_para, a_perp=a_perp)
-    # const = dynamics.SystemConstants(a_para=const.a_para * fac, a_perp=const.a_perp * fac)
+    checkCoefficents()
+    # # detect sign change omega > 0 -> omega < 0 and record theta. Then detect theta = constant with rolling buffer
+    # # do binary search to find bifurcation point for a given set of parameters.
+    # # search in curlyR curlyV and lambda space.
+    # # lambda -> aspect ratio
+    # # curlyR -> density ratio
+    # # curlyV -> particle volume
+    # # plotSettlingSpeedVsAspectRatio()
+    # # 4 -> osciallation
+    # fac = 2 # 3.9375
+    # a_perp, a_para = dynamics.spheriodDimensionsFromBeta(0.2,  9.2e-11)
+    # const = dynamics.SystemConstants(a_para=a_para, a_perp=a_perp)
+    # # const = dynamics.SystemConstants(a_para=const.a_para * fac, a_perp=const.a_perp * fac)
 
-    RNG = np.random.default_rng(0)
-    # for i in range(10):
-    x0 = np.zeros((3,))
-    v0 = RNG.normal(size=(3,)) # 1%
-    n0 = RNG.normal(size=(3,)) # 0.1%
-    n0 /= np.linalg.norm(n0, keepdims=True)
-    omega0 = RNG.normal(size=(3,)) # 0.01 / tau_p
-    y0 = np.concat([x0, v0, n0, omega0])
+    # RNG = np.random.default_rng(0)
+    # # for i in range(10):
+    # x0 = np.zeros((3,))
+    # v0 = RNG.normal(size=(3,)) # 1%
+    # n0 = RNG.normal(size=(3,)) # 0.1%
+    # n0 /= np.linalg.norm(n0, keepdims=True)
+    # omega0 = RNG.normal(size=(3,)) # 0.01 / tau_p
+    # y0 = np.concat([x0, v0, n0, omega0])
 
-    t = np.linspace(0, 200, num=10_000)
-    t, res = c_dynamics.solveDynamics(
-        y0=y0,
-        const=const,
-        t_eval=t,
-        # t_span=(0.0, 1000.0),
-        rel_tol=1e-12,
-        abs_tol=1e-12,
-        event_type=2,
-    )
+    # t = np.linspace(0, 10, num=1_000)
+    # t, res = c_dynamics.solveDynamics(
+    #     y0=y0,
+    #     const=const,
+    #     t_eval=t,
+    #     t_span=(0.0, 10.0),
+    #     rel_tol=1e-12,
+    #     abs_tol=1e-12,
+    #     event_type=0
+    # )
 
-    res = res.T
-    n = res[6:9]
-    theta = np.arccos(n[2])
-    # print(t, theta * 180 / np.pi)
-    # print(f"t: {t} | theta: {theta * 180 / np.pi}")
-    phi = np.sign(n[1]) * np.arccos(n[0] / np.linalg.norm(n[:2], axis=0))
-    plt.style.use(STYLE_FILE)
-    # plt.plot(t[t>40], phi[t>40] * 180 / np.pi, label="$\\varphi(t)$")
-    plt.plot(t, theta * 180 / np.pi, label="$\\theta(t)$")
-    plt.xlabel("Time (s)")
-    plt.ylabel("Angle (deg)")
-    plt.yticks([-30, 0, 30, 60, 90, 120])
-    plt.ylim(-30, 120)
-    plt.legend()
-    plt.tight_layout()
-    plt.show()
+    # res = res.T
+    # n = res[6:9]
+    # theta = np.arccos(n[2])
+    # # print(t, theta * 180 / np.pi)
+    # # print(f"t: {t} | theta: {theta * 180 / np.pi}")
+    # phi = np.sign(n[1]) * np.arccos(n[0] / np.linalg.norm(n[:2], axis=0))
+    # plt.style.use(STYLE_FILE)
+    # # plt.plot(t[t>40], phi[t>40] * 180 / np.pi, label="$\\varphi(t)$")
+    # plt.plot(t, theta * 180 / np.pi, label="$\\theta(t)$")
+    # plt.xlabel("Time (s)")
+    # plt.ylabel("Angle (deg)")
+    # plt.yticks([-30, 0, 30, 60, 90, 120])
+    # plt.ylim(-30, 120)
+    # plt.legend()
+    # plt.tight_layout()
+    # plt.show()

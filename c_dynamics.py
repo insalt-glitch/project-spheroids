@@ -9,12 +9,13 @@ import dynamics
 
 LIBARY_PATH = Path("cpp-impl/solve.so")
 CPP_STRUCT_MEMBERS = [
-    "m_p", "beta", "A_perp", "C_perp", "F_lambda", "J_perp",
-    "J_para", "_A_diff", "_C_diff", "_fac_TF_h0", "_fac_F_h1",
-    "_fac_T_h1", "_fac_Re_p0", "_fac1_v_g_star", "_fac2_v_g_star",
-    "_J_diff", "_C_F_prolate_c0", "_C_F_prolate_c1", "_C_F_prolate_c2",
-    "_C_F_oblate_c0", "_C_F_oblate_c1", "_C_T_prolate_c0", "_C_T_prolate_c1",
-    "_C_T_prolate_c2", "_C_T_oblate_c0", "g_x", "g_y", "g_z",
+    "beta", "curly_A_F", "curly_A_T",
+    "A_para", "A_perp", "C_para", "C_perp", "J_para", "J_perp",
+    "_fac_Re_p0", "_fac1_v_g_star", "_fac2_v_g_star",
+    "_C_F_prolate_c0", "_C_F_prolate_c1", "_C_F_prolate_c2",
+    "_C_F_oblate_c0", "_C_F_oblate_c1",
+    "_C_T_prolate_c0", "_C_T_prolate_c1", "_C_T_prolate_c2",
+    "_C_T_oblate_c0",
 ]
 C_DOUBLE_PTR = POINTER(c_double)
 
@@ -25,8 +26,8 @@ class CppConfig:
     def __init__(self, const: dynamics.SystemConstants):
         self.cpp_constants_struct = CppConfig.initConstants(const)
 
-        c_dll = np.ctypeslib.load_library(LIBARY_PATH, ".")
-        self.func_solve = c_dll.solveDynamics
+        self.c_dll = np.ctypeslib.load_library(LIBARY_PATH, ".")
+        self.func_solve = self.c_dll.solveDynamics
         self.func_solve.restype = None
         self.func_solve.argtypes = [
             POINTER(C_DOUBLE_PTR),
@@ -47,9 +48,9 @@ class CppConfig:
             value = getattr(const, name, None)
             if value is not None:
                 setattr(struct, name, c_double(value))
-        for i, axis in enumerate(["x", "y", "z"]):
-            setattr(struct, f"g_{axis}", c_double(const.g[i]))
-        struct.g_pad = c_double(0.0)
+        # for i, axis in enumerate(["x", "y", "z"]):
+        #     setattr(struct, f"g_{axis}", c_double(const.g[i]))
+        # struct.g_pad = c_double(0.0)
         return struct
 
 def _numpyArray2DToCtypesPtr(arr):
@@ -69,6 +70,12 @@ def solveDynamics(
     ):
     if t_eval is None and t_span is None:
         raise ValueError("Must specify t_eval or t_span")
+    # for name in CPP_STRUCT_MEMBERS:
+    #     value = getattr(const, name, None)
+    #     print(f"{name}: {value}")
+        # if value is not None:
+        #     setattr(struct, name, c_double(value))
+    # print(const)
     config = CppConfig(const)
     result_size = 1 if t_eval is None else t_eval.size
     result = np.empty(shape=(result_size, 12), dtype=np.float64)

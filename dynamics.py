@@ -23,7 +23,7 @@ class SystemConstants:
             m_p      (float): particle mass
             tau_p    (float): particle response time
             W_approx (float): approximate particle settling speed
-            F_lambda (float): particle shape factor
+            F_beta   (float): particle shape factor
             g   (np.ndarray): gravitational acceleration
         Correction factors:
             C_F      (float): Stokes force (quiescent fluid)
@@ -60,7 +60,7 @@ class SystemConstants:
         self.a_perp = a_perp
         self.a_para = a_para
         self.a = max(a_perp, a_para)
-        self.F_lambda = shapeFactor(self.beta)
+        self.F_beta = shapeFactor(self.beta)
         self.g = np.array([gravitational_acceleration, 0, 0])
         self.m_p = particleMass(self.particle_volume, particle_density)
         self.tau_p = particleResponseTime(
@@ -86,15 +86,24 @@ class SystemConstants:
             a_para,
             self.m_p,
         )
+        # NOTE: make dimensionless
+        self.curly_R = self.rho_p / self.rho_f
+        self.curly_V = gravitational_acceleration * self.particle_volume / self.nu ** 2
+        self.curly_A_F = self.curly_R * self.curly_V / (32 * np.pi)
+        self.curly_A_T = self.beta * max(1, self.beta) ** 3 * self.F_beta * self.curly_R ** 3 * self.curly_V ** 2 / (972 * np.pi)
+        self.C_para = self.C_para / self.a_perp ** 2
+        self.C_perp = self.C_perp / self.a_perp ** 2
+        self.J_para = self.J_para / (self.m_p * self.a_perp ** 2)
+        self.J_perp = self.J_perp / (self.m_p * self.a_perp ** 2)
         # derived constants for precomputation
-        self._A_diff = self.A_para - self.A_perp
-        self._C_diff = self.C_para - self.C_perp
-        self._fac_TF_h0 = - (self.m_p / self.tau_p)
-        self._fac_F_h1 = - (3 / 16) * (self.m_p / self.tau_p) * (self.a_perp / self.nu)
-        self._fac_T_h1 = self.F_lambda * (self.m_p / (6 * np.pi)) \
-            * (self.a ** 3 / (self.a_perp * self.nu)) / self.tau_p
-        self._J_diff = self.J_perp - self.J_para
-        self._fac_Re_p0 = self.a / self.nu
+        # self._A_diff = self.A_para - self.A_perp
+        # self._C_diff = self.C_para - self.C_perp
+        # self._fac_TF_h0 = - (self.m_p / self.tau_p)
+        # self._fac_F_h1 = - (3 / 16) * (self.m_p / self.tau_p) * (self.a_perp / self.nu)
+        # self._fac_T_h1 = self.F_beta * (self.m_p / (6 * np.pi)) \
+        #     * (self.a ** 3 / (self.a_perp * self.nu)) / self.tau_p
+        # self._J_diff = self.J_perp - self.J_para
+        self._fac_Re_p0 = gravitational_acceleration * self.tau_p * self.a / self.nu
         self._fac1_v_g_star = 4 * self.nu / (3 * self.a_perp * self.A_g)
         self._fac2_v_g_star = 3 * self.a_perp * np.linalg.norm(self.g) * self.tau_p / (2 * self.nu)
         self._C_F_oblate_c0 = 0.7311124212687891 * self.beta ** 96.47233333333332
@@ -116,18 +125,18 @@ class SystemConstants:
         self._C_T_prolate_c1 = np.real(
             self._c_t[0] * np.log(self.beta + 0j) ** self._c_t[1]
             * (self.beta ** (2 / 3) / 2) ** self._c_t[2] * np.pi
-            / (self.beta ** 2 * np.abs(self.F_lambda))
+            / (self.beta ** 2 * np.abs(self.F_beta))
         )
         self._C_T_prolate_c2 = np.real(
             self._c_t[3] * np.log(self.beta + 0j) ** self._c_t[4]
             * (self.beta ** (2 / 3) / 2) ** self._C_T_prolate_c0 * np.pi
-            / (self.beta ** 2 * np.abs(self.F_lambda))
+            / (self.beta ** 2 * np.abs(self.F_beta))
         )
         self._C_T_oblate_c0 = np.real(
             np.pi * self.beta / (max(1, self.beta) ** 3) * 1.85
             * ((1 - self.beta + 0j) / self.beta) ** 0.832 * (max(1, self.beta)
             / (2 * self.beta ** (1 / 3))) ** 0.146
-            / (2 * np.abs(self.F_lambda))
+            / (2 * np.abs(self.F_beta))
         )
 
 def spheriodDimensionsFromBeta(beta: float, particle_volume: float) -> Tuple[float, float]:
@@ -308,7 +317,7 @@ def particleReynoldsNumber(
     return Re_p0
 
 def shapeFactor(beta: float) -> float:
-    """Calculate the shape factor/function F_lambda for the interial torque of spheriods.
+    """Calculate the shape factor/function F_beta for the interial torque of spheriods.
 
     Formulas taken from here: https://doi.org/10.1017/jfm.2015.360
         (Page 149 - Chapter 4 - Eqs. 4.1 & 4.2)
@@ -356,6 +365,7 @@ def translationalResistanceCoefficients(beta: float) -> Tuple[float, float]:
         Tuple[float, float]: coefficients in (perpendicular, parallel) direction
     """
     gamma = np.log(beta + np.sqrt(beta ** 2 - 1 + 0j)) / (beta * np.sqrt(beta ** 2 - 1 + 0j))
+    assert abs(np.imag(gamma)) < 1e-10, "What happend?"
     gamma = np.real(gamma)
     A_perp = 8 * (beta ** 2 - 1) / (3 * beta * ((2 * beta ** 2 - 3) * gamma + 1))
     A_para = 4 * (beta ** 2 - 1) / (3 * beta * ((2 * beta ** 2 - 1) * gamma - 1))
