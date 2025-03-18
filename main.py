@@ -6,6 +6,7 @@ import dynamics
 import c_dynamics
 from pathlib import Path
 from tqdm import tqdm
+import ctypes
 
 FOLDER_FIGURES = Path("figures")
 STYLE_FILE = "plot_style.mplstyle"
@@ -23,9 +24,9 @@ def plotCoefficientsVsReynoldsNumber(save=False):
         arr_C_F = np.zeros_like(arr_Re_p)
         arr_C_T = np.zeros_like(arr_Re_p)
         for i, Re_p in enumerate(arr_Re_p):
-            shape_factor = dynamics.shapeFactor(beta)
-            arr_C_F[i] = dynamics.correctionFactorStokesForce(Re_p, beta)
-            arr_C_T[i] = dynamics.correctionFactorTorque(Re_p, beta, shape_factor)
+            const = dynamics.SystemConstants(a_para=beta, a_perp=1.0)
+            arr_C_F[i] = dynamics.correctionFactorStokesForce(Re_p, const)
+            arr_C_T[i] = dynamics.correctionFactorTorque(Re_p, const)
         ax_cf.plot(arr_Re_p, arr_C_F, label=f"{beta:.2f}")
         ax_ct.plot(arr_Re_p, arr_C_T, label=f"{beta:.2f}")
     for ax in axes:
@@ -124,7 +125,7 @@ def plotKPhiFormula(save=False):
         plt.savefig(FOLDER_FIGURES / "K_phi=0-formula_comparison.png", dpi=500, bbox_inches="tight")
     plt.show()
 
-def plotCorrectionCoefficients(save=False):
+def plotCorrectionCoefficients(python_impl=True, save=False):
     const = dynamics.SystemConstants()
     plt.style.use("plot_style.mplstyle")
     fig, axes = plt.subplots(1, 2, figsize=(10,4))
@@ -133,6 +134,19 @@ def plotCorrectionCoefficients(save=False):
         2.08e-3 * 1e-9, # m^3
         28.28e-3 * 1e-9, # m^3
     ]
+    if not python_impl:
+        c_config = c_dynamics.CppConfig(const)
+        c_config.c_dll.correctionFactorStokesForce.argtypes = [
+            ctypes.c_double,
+            ctypes.POINTER(c_dynamics.CppConstantsStruct)
+        ]
+        c_config.c_dll.correctionFactorTorque.argtypes = [
+            ctypes.c_double,
+            ctypes.POINTER(c_dynamics.CppConstantsStruct)
+        ]
+        c_config.c_dll.correctionFactorStokesForce.restype = ctypes.c_double
+        c_config.c_dll.correctionFactorTorque.restype = ctypes.c_double
+
     for i, volume in enumerate(particle_volumes):
         C_F_arrs = [[], []]
         C_T_arrs = [[], []]
@@ -145,13 +159,21 @@ def plotCorrectionCoefficients(save=False):
                 a_perp, a_para = dynamics.spheriodDimensionsFromBeta(beta, volume)
                 const = dynamics.SystemConstants(a_perp=a_perp, a_para=a_para)
                 Re_p0 = dynamics.particleReynoldsNumber(const.a_perp, const.a_para, const.W_approx, const.nu)
-                C_F = dynamics.correctionFactorStokesForce(Re_p0, const.beta, full_solve=False)
+                if python_impl:
+                    C_F = dynamics.correctionFactorStokesForce(Re_p0, const, full_solve=False)
+                else:
+                    local_config = c_dynamics.CppConfig(const)
+                    C_F = c_config.c_dll.correctionFactorStokesForce(Re_p0, ctypes.byref(local_config.cpp_constants_struct))
                 v_g_star = dynamics.steadyStateSettlingSpeed(C_F, const.a_perp, const.tau_p, const.A_g, const.nu, const.g)
                 Re_p = dynamics.particleReynoldsNumber(const.a_perp, const.a_para, v_g_star, const.nu)
-                C_T = dynamics.correctionFactorTorque(Re_p, const.beta, const.F_beta)
+                if python_impl:
+                    C_T = dynamics.correctionFactorTorque(Re_p, const)
+                else:
+                    local_config = c_dynamics.CppConfig(const)
+                    C_T = c_config.c_dll.correctionFactorTorque(Re_p, ctypes.byref(local_config.cpp_constants_struct))
+
                 C_F_arrs[j].append(C_F)
                 C_T_arrs[j].append(C_T)
-
 
         for ax, coeff_arrs in zip(axes, [C_F_arrs, C_T_arrs]):
             i_roman = 'I'*(i+1)
@@ -241,84 +263,77 @@ def discriminantDelta(const: dynamics.SystemConstants):
     curly_V = np.linalg.norm(const.g) * const.particle_volume / const.nu ** 2
     delta = 1 - 4 * vg_nondim ** 2 * C_T * curly_R ** 3 * curly_V ** 2
 
-def matlabComparison():
-    matlab_folder = Path("matlab_data")
-    parameters = np.loadtxt(matlab_folder / "parameters.csv", skiprows=1, delimiter=",")
-    files = sorted(matlab_folder.glob("run_*.csv"))
-    assert len(files) == parameters.shape[0], "Expected same number!"
-    for params, filename in zip(parameters, files):
-        matlab_full_run = np.loadtxt(filename, delimiter=",")
-        t_mat = matlab_full_run[:,0]
-        res_mat = matlab_full_run[:,1:]
-        const = dynamics.SystemConstants(
-            gravitational_acceleration=params[0],
-            fluid_kinematic_viscosity=params[2],
-            a_perp=params[3],
-            a_para=params[4],
-        )
-        x0     = params[5+0:5+3] * np.sqrt(const.tau_p * const.nu) / (np.linalg.norm(const.g) * const.tau_p ** 2)
-        v0     = params[5+3:5+6] * np.sqrt(const.tau_p * const.nu) / (np.linalg.norm(const.g) * const.tau_p ** 2)
-        n0     = params[5+6:5+9]
-        omega0 = params[5+9:5+12]
-        y0 = np.concat([x0, v0, n0, omega0])
-        t_end = params[-1]
-        t = np.linspace(0.0, t_end, num=10_000)
-        t_py, res_py = c_dynamics.solveDynamics(
-            y0=y0,
-            const=const,
-            t_eval=t,
-            t_span=(0.0, 10.0),
-            rel_tol=1e-12,
-            abs_tol=1e-12,
-            event_type=0
-        )
-
-        res_py[:,:3] *= (np.linalg.norm(const.g) * const.tau_p ** 2) / np.sqrt(const.tau_p * const.nu)
-        res_py[:,3:6] *= (np.linalg.norm(const.g) * const.tau_p ** 2) / np.sqrt(const.tau_p * const.nu)
-        res_compatible = np.vstack([np.interp(t_mat, t, res_py[:,i]) for i in range(12)]).T
-        plt.plot(t_py, res_py[:,3+0], label="python x", color="black", ls="solid", lw=2)
-        plt.plot(t_py, res_py[:,3+1], label="python y", color="blue", ls="solid", lw=2)
-        plt.plot(t_py, res_py[:,3+2], label="python z", color="grey", ls="solid", lw=2)
-        plt.plot(t_mat, res_mat[:,3+0], label="matlab x", ls=":", color="orange", lw=1.5)
-        plt.plot(t_mat, res_mat[:,3+1], label="matlab y", ls=":", color="red", lw=1.5)
-        plt.plot(t_mat, res_mat[:,3+2], label="matlab z", ls=":", color="green", lw=1.5)
-        plt.legend()
-        plt.show()
-
-        res_compatible = np.vstack([np.interp(t_mat, t, res_py[:,i]) for i in range(12)]).T
-        idx = np.abs(res_compatible) > 1e-4
-        print(f"Average relative distance: {np.mean(1 - np.abs(res_mat[idx] / res_compatible[idx])):.2E}")
 
 def checkCoefficents():
-    folder = Path("coefficients")
-    for file, beta in zip([folder / "CTCFCoeffs_lamRod0_2.txt", folder / "CTCFCoeffs_lamRod0_5.txt" ], [0.2, 0.5]):
+    folder = Path("coefficients_full")
+    for file in folder.glob("*.txt"):
+        beta = float(file.stem.split("lamRod")[-1].replace("_", "."))
+        print(f"aspect-ratio = {beta:.2f}")
         data = np.loadtxt(file)
-        print(data.shape)
         Re = data[:,0]
-        Cf = data[:,1]
-        Ct = data[:,2]
+        C_F_ref = data[:,1]
+        C_T_ref = data[:,2]
         const = dynamics.SystemConstants(a_para=beta, a_perp=1)
         config = c_dynamics.CppConfig(const)
-        import ctypes
+
         config.c_dll.correctionFactorStokesForce.argtypes = [
             ctypes.c_double,
             ctypes.POINTER(c_dynamics.CppConstantsStruct)
         ]
-        config.c_dll.correctionFactorStokesForce.restype = ctypes.c_double
-        # print(config.c_dll.correctionFactorStokesForce(, ctypes.byref(config.cpp_constants_struct)))
-        C_F = [config.c_dll.correctionFactorStokesForce(reynold, ctypes.byref(config.cpp_constants_struct)) for reynold in Re]
         config.c_dll.correctionFactorTorque.argtypes = [
             ctypes.c_double,
             ctypes.POINTER(c_dynamics.CppConstantsStruct)
         ]
+        config.c_dll.correctionFactorStokesForce.restype = ctypes.c_double
         config.c_dll.correctionFactorTorque.restype = ctypes.c_double
-        C_T = [config.c_dll.correctionFactorTorque(reynold, ctypes.byref(config.cpp_constants_struct)) for reynold in Re]
-        print(np.sum(np.abs(C_F - Cf)))
-        print(np.sum(np.abs(C_T - Ct)))
+        C_F_cpp = [config.c_dll.correctionFactorStokesForce(reynold, ctypes.byref(config.cpp_constants_struct)) for reynold in Re]
+        C_T_cpp = [config.c_dll.correctionFactorTorque(reynold, ctypes.byref(config.cpp_constants_struct)) for reynold in Re]
+        print(f"C_F diff :: mean = {np.mean(np.abs(C_F_cpp - C_F_ref)):.4e} | max = {np.max(np.abs(C_F_cpp - C_F_ref)):.4e}")
+        print(f"C_T diff :: mean = {np.mean(np.abs(C_T_cpp - C_T_ref)):.4e} | max = {np.max(np.abs(C_T_cpp - C_T_ref)):.4e}")
+        print()
+        plt.plot(Re, np.abs(C_F_cpp - C_F_ref))
+        plt.title(beta)
+        plt.show()
 
 
 if __name__ == '__main__':
-    checkCoefficents()
+    beta_arr = np.concat([np.linspace(0.18, 0.8), np.linspace(1.25, 5)])
+    particle_volumes = [
+        1.44e-3 * 1e-9, # m^3
+        2.08e-3 * 1e-9, # m^3
+        28.28e-3 * 1e-9, # m^3
+    ]
+
+    C_F_cpp = []
+    C_F_py = []
+    C_T_cpp = []
+    C_T_py = []
+    for beta in beta_arr:
+        a_perp, a_para = dynamics.spheriodDimensionsFromBeta(beta, particle_volumes[0])
+        const = dynamics.SystemConstants(a_perp=a_perp, a_para=a_para)
+        Re_p0 = dynamics.particleReynoldsNumber(const.a_perp, const.a_para, const.W_approx, const.nu)
+        config = c_dynamics.CppConfig(const)
+
+        config.c_dll.correctionFactorStokesForce.argtypes = [
+            ctypes.c_double,
+            ctypes.POINTER(c_dynamics.CppConstantsStruct)
+        ]
+        config.c_dll.correctionFactorTorque.argtypes = [
+            ctypes.c_double,
+            ctypes.POINTER(c_dynamics.CppConstantsStruct)
+        ]
+        config.c_dll.correctionFactorStokesForce.restype = ctypes.c_double
+        config.c_dll.correctionFactorTorque.restype = ctypes.c_double
+        C_F_cpp.append(config.c_dll.correctionFactorStokesForce(Re_p0, ctypes.byref(config.cpp_constants_struct)))
+        C_F_py.append(dynamics.correctionFactorStokesForce(Re_p0, const, full_solve=False))
+
+    plt.plot(beta_arr, C_F_cpp, ls="solid", lw=2)
+    plt.plot(beta_arr, C_F_py, ls="dashed", lw=1)
+    plt.xscale("log")
+    plt.show()
+
+
+
     # # detect sign change omega > 0 -> omega < 0 and record theta. Then detect theta = constant with rolling buffer
     # # do binary search to find bifurcation point for a given set of parameters.
     # # search in curlyR curlyV and lambda space.

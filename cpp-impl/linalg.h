@@ -143,4 +143,25 @@ f64 newtonMethod(const f64 x0, F f, FPrime f_prime, ArgTypes... args) {
     return x_next;
 }
 
+template<typename F, typename... ArgTypes>
+f64 bisectionMethod(F f, ArgTypes... args) {
+    f64 a = 1e-10;
+    f64 b = 128.0;
+    f64 c, f_c;
+    u32 n = 0;
+    while (n < 30) {
+        c = (a + b) / 2.0;
+        f_c = f(c, args...);
+        // printf("c = %.4e | f(c) = %.4e\n", c ,f_c);
+        if (f_c == 0.0|| (b - a) / 2.0 < 1e-6) return c;
+        ++n;
+        if (signbit(f_c) == signbit(f(a, args...))) {
+            a = c;
+        } else {
+            b = c;
+        }
+    };
+    return c;
+}
+
 #endif
