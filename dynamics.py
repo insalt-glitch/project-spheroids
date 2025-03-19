@@ -81,8 +81,8 @@ class SystemConstants:
         self.J_perp, self.J_para = particleInteriaTensorCoefficents(self.beta)
 
         self.Re_p0 = particleReynoldsNumber(self.a_max, self.W, self.nu)
-        self.curly_A_F = self.curly_R * self.curly_V / (32 * np.pi)
-        self.curly_A_T = self.beta * max(1, self.beta) ** 3 * self.F_beta * self.curly_R ** 3 * self.curly_V ** 2 / (972 * np.pi ** 3)
+        self.curly_A_F = computeCurlyAStokesForce(self.curly_R, self.curly_V)
+        self.curly_A_T = computeCurlyATorque(self.beta, self.curly_R, self.curly_V)
 
         # ----------------- Constans for precomputation -----------------
         self._fac_Re_p = self.a_max / self.nu
@@ -219,6 +219,7 @@ def approximateSettlingSpeed(
     Returns:
         float: slip velocity
     """
+    # a_perp * A_g = a_max
     A_g = resistanceCoefficient(beta)
     return np.linalg.norm(g) * tau_p / A_g
 
@@ -366,3 +367,10 @@ def particleInteriaTensorCoefficents(
     J_perp = (1 / 5) * (1 + beta ** 2)
     J_para = (2 / 5)
     return J_perp, J_para
+
+def computeCurlyAStokesForce(curly_R: float, curly_V: float) -> float:
+    return curly_R * curly_V / (32 * np.pi)
+
+def computeCurlyATorque(beta: float, curly_R: float, curly_V: float) -> float:
+    F_beta = shapeFactor(beta)
+    return beta * max(1.0, beta) ** 3 * F_beta * curly_R ** 3 * curly_V ** 2 / (972 * np.pi ** 3)

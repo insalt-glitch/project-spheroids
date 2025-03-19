@@ -22,12 +22,24 @@ class CppConstantsStruct(ctypes.Structure):
 
 class CppConfig:
     def __init__(self, const: dynamics.SystemConstants):
-        self.cpp_constants_struct = CppConfig.initConstants(const)
+        self.cpp_constants_struct = CppConfig._initConstants(const)
 
         self.c_dll = np.ctypeslib.load_library(LIBARY_PATH, ".")
-        self.func_solve = self.c_dll.solveDynamics
-        self.func_solve.restype = None
-        self.func_solve.argtypes = [
+        self.c_compute_C_F = self.c_dll.correctionFactorStokesForce
+        self.c_compute_C_T = self.c_dll.correctionFactorTorque
+        self.c_solve_dynamics = self.c_dll.solveDynamics
+        self.c_compute_C_F.restype = c_double
+        self.c_compute_C_T.restype = c_double
+        self.c_solve_dynamics.restype = None
+        self.c_compute_C_F.argtypes = [
+            c_double,
+            POINTER(CppConstantsStruct),
+        ]
+        self.c_compute_C_T.argtypes = [
+            c_double,
+            POINTER(CppConstantsStruct),
+        ]
+        self.c_solve_dynamics.argtypes = [
             POINTER(C_DOUBLE_PTR),
             POINTER(c_size_t),
             C_DOUBLE_PTR,
@@ -37,10 +49,11 @@ class CppConfig:
             POINTER(CppConstantsStruct),
             c_double,
             c_double,
-            c_int
+            c_int,
         ]
 
-    def initConstants(const: dynamics.SystemConstants) -> CppConstantsStruct:
+
+    def _initConstants(const: dynamics.SystemConstants) -> CppConstantsStruct:
         struct = CppConstantsStruct()
         for name in CPP_STRUCT_MEMBERS:
             value = getattr(const, name, None)
@@ -49,6 +62,16 @@ class CppConfig:
             else:
                 raise TypeError(f"Missing {name}")
         return struct
+
+    def correctionFactorStokesForce(self, Re_p0: float) -> float:
+        return self.c_compute_C_F(
+            Re_p0, byref(self.cpp_constants_struct)
+        )
+
+    def correctionFactorTorque(self, Re_p0: float) -> float:
+        return self.c_compute_C_T(
+            Re_p0, byref(self.cpp_constants_struct)
+        )
 
 def _numpyArray2DToCtypesPtr(arr):
     ct_arr = np.ctypeslib.as_ctypes(arr)
@@ -81,7 +104,7 @@ def solveDynamics(
         t_eval_ptr = None
     y_eval = _numpyArray2DToCtypesPtr(result)
     num_evaluations = c_size_t(0)
-    config.func_solve(
+    config.c_solve_dynamics(
         y_eval,
         byref(num_evaluations),
         t_span_ptr,
