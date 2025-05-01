@@ -6,6 +6,8 @@ __pycache__/
 *.prof
 *.so
 *.h5
+*.log
+*.txt
 matlab_data/
 matlab_data_cf=0_ct=0/
 coefficients/

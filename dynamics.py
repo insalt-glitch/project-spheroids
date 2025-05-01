@@ -83,6 +83,7 @@ class SystemConstants:
         self.Re_p0 = particleReynoldsNumber(self.a_max, self.W, self.nu)
         self.curly_A_F = computeCurlyAStokesForce(self.curly_R, self.curly_V)
         self.curly_A_T = computeCurlyATorque(self.beta, self.curly_R, self.curly_V)
+        self.v_g = (np.sqrt(1 + 8 * self.curly_A_F) - 1) / (4 * self.A_perp * self.curly_A_F)
 
         # ----------------- Constans for precomputation -----------------
         self._fac_Re_p = self.a_max / self.nu
