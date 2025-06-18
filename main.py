@@ -98,7 +98,7 @@ def plotSettlingSpeedVsAspectRatio(save=False):
         xlabel = "Aspect ratio $\\lambda$",
         ylabel = "Settling speed $v_g^*$ (m/s)",
         xlim = (0.15, 6),
-        ylim = (0.2, 1.6),
+        ylim = (0.2, 1.8),
         xscale = "log",
         xticks = [0.2, 0.5, 1, 2, 5],
         yticks = [0.4, 0.8, 1.2, 1.6],
@@ -146,7 +146,7 @@ def plotKPhiFormula(save=False):
 def plotCorrectionCoefficients(save=False):
     const = dynamics.SystemConstants()
     plt.style.use(STYLE_FILE)
-    fig, axes = plt.subplots(1, 2, figsize=(10,4))
+    fig, axes = plt.subplots(1, 2, figsize=(8,4))
     particle_volumes = [
         1.44e-3 * 1e-9, # m^3
         2.08e-3 * 1e-9, # m^3
