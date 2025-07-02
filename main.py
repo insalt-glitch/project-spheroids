@@ -65,7 +65,7 @@ def plotSettlingSpeedVsAspectRatio(save=False):
     markers = ["o", "p", "v"]
     colors = ['#e69f00', '#56b4e9', '#009e73']
     plt.style.use(STYLE_FILE)
-    fig, ax = plt.subplots(1, 1, figsize=(6,4))
+    fig, ax = plt.subplots(1, 1, figsize=(4,4))
     for volume_idx, (volume, marker, color) in enumerate(zip(particle_volumes, markers, colors)):
         v_settle = np.empty(betas.size)
         v_settle_err = np.empty(betas.size)
@@ -106,10 +106,9 @@ def plotSettlingSpeedVsAspectRatio(save=False):
     minor_locator = matplotlib.ticker.AutoMinorLocator(4)
     ax.yaxis.set_minor_locator(minor_locator)
     ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
-    plt.legend(loc="center right")
+    plt.legend(loc=(0.4,0.3), frameon=False)
     if save:
         saveFigure("settling_velocity-vs-aspect_ratio")
-    plt.show()
 
 def plotKPhiFormula(save=False):
     def KPhi0MATLAB(beta):
@@ -196,7 +195,7 @@ def plotCorrectionCoefficients(save=False):
     plt.tight_layout()
     if save:
         saveFigure("correction_coefficients-C_F-C_T-vs-aspect_ratio")
-    plt.show()
+    # plt.show()
 
 def plotShapeFactor(save=False):
     betas = np.logspace(-2, 2, num=200)
